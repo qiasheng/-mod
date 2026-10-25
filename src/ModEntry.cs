@@ -536,7 +536,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.2.0");
+                ZLog.W("entry build 3.2.1");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -913,6 +913,7 @@ namespace Zhiji
                 MegaCrit.Sts2.Core.Runs.RunManager.Instance.RunStarted += st2 =>
                 {
                     try { if (st2 != null && st2.Players != null && st2.Players.Count > 0) Visuals.ShowDifficultyToggle(st2.Players[0]); } catch { }
+                    try { Visuals.ResetTransformCount(); } catch { }
                     try { RefreshForceHatchCache(); ZLog.W("force hatch cache=" + _forceHatchCached); }
                     catch (Exception e) { ZLog.W("diff toggle hook fail " + e.Message); }
                 };
@@ -5388,6 +5389,13 @@ namespace Zhiji
         {
             try
             {
+                // 演出跳过：按住空格/Esc 时直接略过等待
+                try
+                {
+                    if (Godot.Input.IsKeyPressed(Godot.Key.Space) || Godot.Input.IsKeyPressed(Godot.Key.Escape))
+                        return System.Threading.Tasks.Task.CompletedTask;
+                }
+                catch { }
                 var tree = Godot.Engine.GetMainLoop() as Godot.SceneTree;
                 if (tree == null) return System.Threading.Tasks.Task.CompletedTask;
                 var timer = tree.CreateTimer(sec);

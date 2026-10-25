@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using System.Collections.Generic;
 using System.IO;
 using Godot;
@@ -1194,6 +1195,50 @@ namespace Zhiji
             return false;
         }
 
+        static long _lastCardRefresh;
+        static int _lastSig;
+        public static void RefreshHandValues()
+        {
+            try
+            {
+                long now = System.Environment.TickCount64;
+                if (now - _lastCardRefresh < 300) return;
+                _lastCardRefresh = now;
+                var rm = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                var rs = rm != null ? rm.DebugOnlyGetState() : null;
+                var pl = rs != null && rs.Players != null && rs.Players.Count > 0 ? rs.Players[0] : null;
+                if (pl == null) return;
+                var st = ZhijiStore.Of(pl);
+                int sig = st.Pulse * 31 + st.Feast * 17 + st.Stand * 7 + (int)pl.Creature.GetPowerAmount<MegaCrit.Sts2.Core.Models.Powers.StrengthPower>();
+                if (sig == _lastSig) return;
+                _lastSig = sig;
+                var tree = Engine.GetMainLoop() as SceneTree;
+                if (tree == null) return;
+                var stack = new Stack<Godot.Node>();
+                stack.Push(tree.Root);
+                int n = 0;
+                while (stack.Count > 0)
+                {
+                    var node = stack.Pop();
+                    if (node == null) continue;
+                    foreach (var ch in node.GetChildren()) if (ch is Godot.Node cn) stack.Push(cn);
+                    var tn = node.GetType().Name;
+                    if (tn == "NCard")
+                    {
+                        try
+                        {
+                            var m = node.GetType().GetMethod("UpdateVisuals", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                            m?.Invoke(node, null);
+                            n++;
+                        }
+                        catch { }
+                    }
+                }
+                if (n > 0) ZLog.W("hand values refreshed x" + n + " sig=" + sig);
+            }
+            catch { }
+        }
+
         public static void SyncUiOcclusion()
         {
             try
@@ -1828,6 +1873,9 @@ void fragment() {
 
         static string _animFolder = "transform";
 
+        public static int TransformPlayed;
+        public static void ResetTransformCount() { TransformPlayed = 0; }
+
         public static void PlayTransform(string folder = "transform")
         {
             try
@@ -1835,6 +1883,14 @@ void fragment() {
                 var tree = Engine.GetMainLoop() as SceneTree;
                 if (tree == null) return;
                 StopTransform();
+                // 第二次及以后：原地变身，不再放全屏演出
+                if (folder == "transform" && TransformPlayed >= 1)
+                {
+                    TransformPlayed++;
+                    ZLog.W("transform in place (#" + TransformPlayed + ")");
+                    return;
+                }
+                if (folder == "transform") TransformPlayed++;
                 _animFolder = folder;
                 var first = Art.GetSequence(folder, 0);
                 if (first == null) { ZLog.W("no transform frames"); return; }
@@ -1867,6 +1923,17 @@ void fragment() {
         {
             try
             {
+                // 空格/Esc/鼠标左键：跳过变身演出
+                try
+                {
+                    if (Godot.Input.IsKeyPressed(Godot.Key.Space) || Godot.Input.IsKeyPressed(Godot.Key.Escape) || Godot.Input.IsMouseButtonPressed(Godot.MouseButton.Left))
+                    {
+                        ZLog.W("transform anim skipped by input");
+                        StopTransform();
+                        return;
+                    }
+                }
+                catch { }
                 // 按真实时间计算帧号：低帧率时直接跳帧，不会把演出拖长
                 ulong now = Godot.Time.GetTicksMsec();
                 int target = (int)((now - _animStartMs) / 1000.0 * 30.0);
@@ -2350,6 +2417,7 @@ namespace Zhiji
             try { Visuals.TickPopup(); } catch { }
             try { Visuals.EventArtTickPublic(); } catch { }
             try { Visuals.SyncUiOcclusion(); } catch { }
+            try { Visuals.RefreshHandValues(); } catch { }
             try
             {
                 if (!Visuals.OverlayVisible()) return;
