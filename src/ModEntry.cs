@@ -19,7 +19,7 @@ namespace Zhiji
             try { foreach (var q in Quiet) if (s.StartsWith(q)) { quiet = true; break; } } catch { }
             if (!quiet) { try { Godot.GD.Print("[zhiji] " + s); } catch { } }
             if (quiet) return;
-            try { System.IO.File.AppendAllText(System.IO.Path.Combine(Dir, "zhiji_log.txt"), "[" + DateTime.Now.ToString("HH:mm:ss.fff") + "] " + s + "\n"); } catch { }
+            try { if (Godot.OS.GetName() != "Windows") System.IO.File.AppendAllText(System.IO.Path.Combine(Dir, "zhiji_log.txt"), "[" + DateTime.Now.ToString("HH:mm:ss.fff") + "] " + s + "\n"); } catch { }
         }
     }
 
@@ -536,7 +536,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.0.0");
+                ZLog.W("entry build 3.1.0");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -6076,7 +6076,7 @@ namespace Zhiji
                 HookCombatEvents();
                 var cm = MegaCrit.Sts2.Core.Combat.CombatManager.Instance;
                 var st = cm != null ? cm.DebugOnlyGetState() : null;
-                try { var pl0 = st != null && st.Players != null && st.Players.Count > 0 ? st.Players[0] : null; if (pl0 != null) Visuals.HidePlayerCreature(pl0); } catch { }
+                try { var pl0 = st != null && st.Players != null && st.Players.Count > 0 ? st.Players[0] : null; if (pl0 != null) { ZhijiStore.ResetCombat(pl0); Visuals.HidePlayerCreature(pl0); } } catch { }
                 try { Visuals.Warmup(); } catch { }
                 // 兜底：某些入口（调试跳房）不会触发 SetupPlayerTurn，这里延迟补一次回合初始化
                 try

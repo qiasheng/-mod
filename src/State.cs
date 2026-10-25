@@ -115,22 +115,35 @@ namespace Zhiji
 
     public static class ZhijiStore
     {
-        static readonly Dictionary<Player, ZhijiState> Map = new Dictionary<Player, ZhijiState>();
+        // 弱引用关联：旧 Player 对象不再被静态字典长期持有
+        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Player, ZhijiState> Map
+            = new System.Runtime.CompilerServices.ConditionalWeakTable<Player, ZhijiState>();
 
         public static ZhijiState Of(Player p)
         {
             if (p == null) return new ZhijiState();
-            ZhijiState s;
-            if (!Map.TryGetValue(p, out s))
-            {
-                s = new ZhijiState();
-                Map[p] = s;
-            }
-            return s;
+            return Map.GetValue(p, _ => new ZhijiState());
         }
 
-        public static void Reset(Player p) { if (p != null) Map.Remove(p); }
-        public static void ResetAll() { Map.Clear(); }
+        public static void Reset(Player p) { try { if (p != null) Map.Remove(p); } catch { } }
+        public static void ResetAll() { /* CWT 无法整体清空，随玩家对象回收自动释放 */ }
+
+        // 每场战斗开始的临时标记清理
+        public static void ResetCombat(Player p)
+        {
+            try
+            {
+                if (p == null) return;
+                var st = Of(p);
+                st.MinionDeathExploded = false;
+                st.GotEndCard = false;
+                st.EndCardAllowed = true;
+                st.DeathHandled = false;
+                st.AutoPlayPending = false;
+                st.LastInitTurn = -1;
+            }
+            catch { }
+        }
 
         // 整局只生效一次的标记（按 Player 实例，新开一局自然重置）
         static readonly HashSet<object> OnceFlags = new HashSet<object>();

@@ -71,7 +71,7 @@ namespace Zhiji
                 {
                     string f = Path.Combine(dir, "frame_" + index.ToString("0000") + ext);
                     if (!File.Exists(f)) continue;
-                    var img = new Image();
+                    using var img = new Image();
                     var err = ext == ".webp" ? img.LoadWebpFromBuffer(File.ReadAllBytes(f)) : img.LoadPngFromBuffer(File.ReadAllBytes(f));
                     if (err != Error.Ok) continue;
                     return ImageTexture.CreateFromImage(img);
@@ -96,7 +96,7 @@ namespace Zhiji
                     {
                         string f = Path.Combine(dir, key + ext);
                         if (!File.Exists(f)) continue;
-                        var img = new Image();
+                        using var img = new Image();
                         var err = img.LoadPngFromBuffer(File.ReadAllBytes(f));
                         if (err != Error.Ok) continue;
                         tex = ImageTexture.CreateFromImage(img);

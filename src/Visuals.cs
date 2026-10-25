@@ -71,7 +71,7 @@ namespace Zhiji
             {
                 try
                 {
-                    var img = new Image();
+                    using var img = new Image();
                     if (img.LoadPngFromBuffer(File.ReadAllBytes(f)) != Error.Ok) continue;
                     int w = img.GetWidth(), h = img.GetHeight();
                     float k = System.Math.Min(1f, System.Math.Min(CW / (float)w, CH / (float)h));
@@ -80,7 +80,7 @@ namespace Zhiji
                         img.Resize((int)(w * k), (int)(h * k), Image.Interpolation.Lanczos);
                         w = img.GetWidth(); h = img.GetHeight();
                     }
-                    var canvas = Image.CreateEmpty(CW, CH, false, Image.Format.Rgba8);
+                    using var canvas = Image.CreateEmpty(CW, CH, false, Image.Format.Rgba8);
                     canvas.Fill(new Color(0, 0, 0, 0));
                     canvas.BlendRect(img, new Rect2I(0, 0, w, h), new Vector2I((CW - w) / 2, CH - h));
                     var tex = ImageTexture.CreateFromImage(canvas);
