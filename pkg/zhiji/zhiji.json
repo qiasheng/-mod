@@ -1,0 +1,11 @@
+{
+  "id": "zhiji",
+  "name": "吱咿 Zhiji",
+  "author": "dsh",
+  "description": "双形态角色：常态吱咿 -> 觉醒红神。搏动/无休止饥饿/自助餐/戏服替身/流血/卑贱之物。",
+  "version": "3.0.0",
+  "has_pck": false,
+  "has_dll": true,
+  "affects_gameplay": true,
+  "min_game_version": "0.111.0"
+}
