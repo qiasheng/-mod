@@ -1197,10 +1197,12 @@ namespace Zhiji
 
         static long _lastCardRefresh;
         static int _lastSig;
+        static bool _refreshDbg;
         public static void RefreshHandValues()
         {
             try
             {
+                if (!_refreshDbg) { _refreshDbg = true; ZLog.W("refresh tick alive"); }
                 long now = System.Environment.TickCount64;
                 if (now - _lastCardRefresh < 300) return;
                 _lastCardRefresh = now;
@@ -1209,7 +1211,7 @@ namespace Zhiji
                 var pl = rs != null && rs.Players != null && rs.Players.Count > 0 ? rs.Players[0] : null;
                 if (pl == null) return;
                 var st = ZhijiStore.Of(pl);
-                int sig = st.Pulse * 31 + st.Feast * 17 + st.Stand * 7 + (int)pl.Creature.GetPowerAmount<MegaCrit.Sts2.Core.Models.Powers.StrengthPower>();
+                int sig = st.Pulse * 31 + st.Hunger * 13 + st.Feast * 17 + st.Stand * 7 + st.Craving * 3;
                 if (sig == _lastSig) return;
                 _lastSig = sig;
                 var tree = Engine.GetMainLoop() as SceneTree;
@@ -1234,7 +1236,7 @@ namespace Zhiji
                         catch { }
                     }
                 }
-                if (n > 0) ZLog.W("hand values refreshed x" + n + " sig=" + sig);
+                ZLog.W("hand refresh scan cards=" + n + " sig=" + sig);
             }
             catch { }
         }
