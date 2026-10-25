@@ -234,6 +234,12 @@ namespace Zhiji
                         st.Hunger = 0; st.Craving = 0;
                         try { Visuals.SetOverlayForm(false); ZLog.W("shroud: refresh gold overlay"); } catch { }
                     }
+                    else if (st.Form != ZhijiForm.Normal || st.PendingRevert)
+                    {
+                        st.Form = ZhijiForm.Normal;
+                        st.PendingRevert = false;
+                        try { Visuals.SetOverlayForm(false); ZLog.W("shroud enforce normal form"); } catch { }
+                    }
                 }
                 else if (st.GoldShroud)
                 {
