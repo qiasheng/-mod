@@ -150,7 +150,8 @@ namespace Zhiji
 
         /// 形态计数：有目标=进攻，无目标（空放/自身）=防守
         // 流血层数上限统一入口：无遗物 10 / 黄金寿衣 70 / 血肉砧板 90
-        protected static int BleedCapValue(bool shroud, bool board) => board ? 90 : (shroud ? 70 : 10);
+        // 流血不再限制层数（用户建议：限制回复而不是限制流血）
+        protected static int BleedCapValue(bool shroud, bool board) => 999;
 
         protected void CountUse(CardPlay play)
         {

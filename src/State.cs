@@ -69,10 +69,10 @@ namespace Zhiji
         {
             Pulse += n;
             Stand = Math.Min(20, Stand + System.Math.Max(1, n / 2));   // 替身积累减速：随搏动半速增长
-            int gained = Pulse / 4;   // 平衡：3 -> 4，变身更慢
+            int gained = Pulse / 4;   // 每 4 点搏动转 1 点饥饿
             if (gained > 0)
             {
-                Pulse -= gained * 3;
+                Pulse -= gained * 4;
                 AddHunger(gained);
             }
         }
@@ -141,6 +141,14 @@ namespace Zhiji
                 st.DeathHandled = false;
                 st.AutoPlayPending = false;
                 st.LastInitTurn = -1;
+                // 每场战斗重置「每次战斗一次」的遗物标记
+                try
+                {
+                    var pfx = p.GetHashCode() + "|";
+                    foreach (var key in new[] { "old_scythe", "ration_bag", "vile_purse" })
+                        OnceFlags.Remove(pfx + key);
+                }
+                catch { }
             }
             catch { }
         }

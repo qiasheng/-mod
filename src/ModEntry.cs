@@ -536,7 +536,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.1.0");
+                ZLog.W("entry build 3.2.0");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -590,7 +590,6 @@ namespace Zhiji
                     try { if (c.EnergyCost != null && c.EnergyCost.GetWithModifiers(MegaCrit.Sts2.Core.Entities.Cards.CostModifiers.None) <= energy) cands.Add(c); } catch { }
                 }
                 if (cands.Count == 0) return;
-                var pick = cands[_autoRng.Next(cands.Count)];
                 MegaCrit.Sts2.Core.Entities.Creatures.Creature tgt = null;
                 try
                 {
@@ -599,9 +598,20 @@ namespace Zhiji
                 }
                 catch { }
                 bool ok = false;
-                try { ok = pick.TryManualPlay(tgt); } catch (Exception e2) { ZLog.W("auto play fail " + e2.Message); }
+                MegaCrit.Sts2.Core.Models.CardModel pick = null;
+                for (int attempt = 0; attempt < System.Math.Min(3, cands.Count); attempt++)
+                {
+                    int idx = _autoRng.Next(cands.Count);
+                    var cand = cands[idx];
+                    cands.RemoveAt(idx);
+                    try
+                    {
+                        if (cand.TryManualPlay(tgt)) { ok = true; pick = cand; break; }
+                    }
+                    catch (Exception e2) { ZLog.W("auto play fail " + cand.Id.Entry + " " + e2.Message); }
+                }
                 st.AutoPlayPending = false;
-                ZLog.W("unbound auto play " + pick.Id.Entry + " ok=" + ok);
+                ZLog.W("unbound auto play " + (pick != null ? pick.Id.Entry : "none") + " ok=" + ok);
             }
             catch { }
         }
@@ -1971,6 +1981,22 @@ namespace Zhiji
                 if (cmd && cmdText.StartsWith("popup:"))
                 {
                     try { Visuals.Popup(cmdText.Substring(6), new Godot.Color(1f, 0.25f, 0.2f)); ZLog.W("debug popup"); } catch { }
+                }
+                if (cmd && cmdText.StartsWith("pulse:"))
+                {
+                    try
+                    {
+                        int nP = 0; int.TryParse(cmdText.Substring(6), out nP);
+                        var plP2 = DebugPlayer();
+                        if (plP2 != null)
+                        {
+                            var stP = ZhijiStore.Of(plP2);
+                            int before = stP.Pulse, beforeH = stP.Hunger;
+                            stP.AddPulse(nP);
+                            ZLog.W("debug pulse +" + nP + " : pulse " + before + "->" + stP.Pulse + " hunger " + beforeH + "->" + stP.Hunger);
+                        }
+                    }
+                    catch (Exception eP2) { ZLog.W("debug pulse fail " + eP2.Message); }
                 }
                 if (cmd && cmdText.StartsWith("hunger:"))
                 {
@@ -3612,6 +3638,38 @@ namespace Zhiji
                                     if (instU != null) { list[idx].ModifyCard(instU); ZLog.W("unbound reward bias: 1 slot -> " + instU.Id.Entry); }
                                 }
                                 ZLog.W("unbound reward mixed: " + list.Count + " cards");
+                                // 金卡（稀有）爆率过高：三选一里最多保留 1 张稀有，其余降为罕见
+                                try
+                                {
+                                    int rareCount = 0;
+                                    foreach (var rr in list) { try { if (rr.Card != null && rr.Card.Rarity.ToString() == "Rare") rareCount++; } catch { } }
+                                    if (rareCount > 1)
+                                    {
+                                        var unPool2 = new System.Collections.Generic.List<MegaCrit.Sts2.Core.Models.CardModel>();
+                                        foreach (var cc in MegaCrit.Sts2.Core.Models.ModelDb.AllCards)
+                                        {
+                                            if (cc == null) continue;
+                                            if (!(cc is ZhijiCard)) continue;
+                                            if (cc.Rarity.ToString() != "Uncommon") continue;
+                                            unPool2.Add(cc);
+                                        }
+                                        int replaced = 0;
+                                        for (int i = 0; i < list.Count && rareCount > 1; i++)
+                                        {
+                                            try
+                                            {
+                                                if (list[i].Card == null || list[i].Card.Rarity.ToString() != "Rare") continue;
+                                                if (replaced == 0) { replaced++; continue; }   // 保留第一张稀有
+                                                if (unPool2.Count == 0) break;
+                                                var pick2 = unPool2[_rewardRng.Next(unPool2.Count)];
+                                                var inst2 = rsU.CreateCard(pick2, player);
+                                                if (inst2 != null) { list[i].ModifyCard(inst2); rareCount--; ZLog.W("reward rare cap -> " + inst2.Id.Entry); }
+                                            }
+                                            catch { }
+                                        }
+                                    }
+                                }
+                                catch (Exception eR2) { ZLog.W("reward rare cap fail " + eR2.Message); }
                             }
                         }
                     }
