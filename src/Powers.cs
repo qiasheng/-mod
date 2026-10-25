@@ -343,6 +343,7 @@ namespace Zhiji
                     }
                     else ZLog.W("SetAmount not found");
                 }
+                try { Visuals.RefreshHandValues(); } catch { }
             }
             catch (Exception e) { ZLog.W("power sync fail " + typeof(T).Name + " " + e.Message); }
         }

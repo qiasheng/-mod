@@ -1214,29 +1214,20 @@ namespace Zhiji
                 int sig = st.Pulse * 31 + st.Hunger * 13 + st.Feast * 17 + st.Stand * 7 + st.Craving * 3;
                 if (sig == _lastSig) return;
                 _lastSig = sig;
-                var tree = Engine.GetMainLoop() as SceneTree;
-                if (tree == null) return;
-                var stack = new Stack<Godot.Node>();
-                stack.Push(tree.Root);
-                int n = 0;
-                while (stack.Count > 0)
+                var handNode = MegaCrit.Sts2.Core.Nodes.Combat.NPlayerHand.Instance;
+                if (handNode != null)
                 {
-                    var node = stack.Pop();
-                    if (node == null) continue;
-                    foreach (var ch in node.GetChildren()) if (ch is Godot.Node cn) stack.Push(cn);
-                    var tn = node.GetType().Name;
-                    if (tn == "NCard")
-                    {
-                        try
+                    var hand = MegaCrit.Sts2.Core.Entities.Cards.CardPile.Get(MegaCrit.Sts2.Core.Entities.Cards.PileType.Hand, pl);
+                    int n = 0;
+                    if (hand != null && hand.Cards != null)
+                        foreach (var c in hand.Cards)
                         {
-                            var m = node.GetType().GetMethod("UpdateVisuals", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                            m?.Invoke(node, null);
-                            n++;
+                            if (c == null) continue;
+                            try { var node = handNode.GetCard(c); if (node != null && GodotObject.IsInstanceValid(node)) { node.UpdateVisuals(MegaCrit.Sts2.Core.Entities.Cards.PileType.Hand, MegaCrit.Sts2.Core.Entities.Cards.CardPreviewMode.None); n++; } } catch { }
                         }
-                        catch { }
-                    }
+                    if (n > 0) ZLog.W("hand refresh cards=" + n + " sig=" + sig);
                 }
-                ZLog.W("hand refresh scan cards=" + n + " sig=" + sig);
+                
             }
             catch { }
         }
