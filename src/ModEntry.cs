@@ -648,7 +648,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.36");
+                ZLog.W("entry build 3.3.37");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -3866,9 +3866,10 @@ namespace Zhiji
                 bool shift = false;
                 try { shift = Godot.Input.IsKeyPressed(Godot.Key.Shift); } catch { }
                 if (shift) return true;                               // 按住 Shift = 对自己打出（防守计数）
+                // 3.3.37：先只提示不拦截（拦截会改变出牌手感，等实机确认坐标/操作后再开启）
                 ShowHint("对自己打出：按住 Shift 再点 / 打敌人请拖到目标上");
-                ZLog.W("empty play blocked (hold Shift to self-target) card=" + (__instance != null ? __instance.Id.Entry : "?"));
-                return false;
+                ZLog.W("empty play hint card=" + (__instance != null ? __instance.Id.Entry : "?"));
+                return true;
             }
             catch { return true; }
         }
