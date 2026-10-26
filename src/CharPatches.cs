@@ -173,6 +173,11 @@ namespace Zhiji
         static Godot.CanvasLayer _animToggleLayer;
         static Godot.Button _animToggleBtn;
 
+        public static void HideAnimToggle()
+        {
+            try { if (_animToggleLayer != null && Godot.GodotObject.IsInstanceValid(_animToggleLayer)) _animToggleLayer.Visible = false; } catch { }
+        }
+
         public static void EnsureAnimToggle()
         {
             try

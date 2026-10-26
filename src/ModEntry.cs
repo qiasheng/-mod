@@ -648,7 +648,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.39");
+                ZLog.W("entry build 3.3.41");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -754,6 +754,7 @@ namespace Zhiji
             if (_done) return;
             _done = true;
             var harmony = new Harmony("zhiji");
+            TryPatchPostfixTwo(harmony, "MegaCrit.Sts2.Core.Runs.RunManager", "SetUpNewSingleplayer", "RunSetUpPostfix");
             TryPatch(harmony, "MegaCrit.Sts2.Core.Combat.CombatManager", "SetUpCombat", "AfterSetUpCombat");
             TryPatchPrefix(harmony, "MegaCrit.Sts2.Core.Combat.CombatManager", "SetUpCombat", "BeforeSetUpCombat");
             TryPatch(harmony, "MegaCrit.Sts2.Core.Entities.Players.PlayerCombatState", "ResetEnergy", "AfterResetEnergy");
@@ -3932,6 +3933,24 @@ namespace Zhiji
                 tmr.Timeout += () => { try { if (_hintLabel != null && Godot.GodotObject.IsInstanceValid(_hintLabel)) _hintLabel.Visible = false; } catch { } };
             }
             catch { }
+        }
+
+        // 3.3.40：run 创建瞬间打印牌组，判断旧 15 张牌组是"创建时就有"还是"之后被改写"
+        public static void RunSetUpPostfix(MegaCrit.Sts2.Core.Runs.RunState state)
+        {
+            // 3.3.41：开局后隐藏选人页的「变身演出」按钮（它挂在 Root 上，否则会一直留在画面里）
+            try { CharPatches.HideAnimToggle(); } catch { }
+            try
+            {
+                if (state == null || state.Players == null || state.Players.Count == 0) { ZLog.W("run setup: no players"); return; }
+                var pl = state.Players[0];
+                if (pl == null || pl.Deck == null) { ZLog.W("run setup: no deck"); return; }
+                var sb = new System.Text.StringBuilder();
+                int n = 0;
+                foreach (var c in pl.Deck.Cards) { if (c == null) continue; sb.Append(c.Id.Entry).Append(' '); n++; }
+                ZLog.W("run setup deck n=" + n + " [" + sb.ToString().Trim() + "]");
+            }
+            catch (Exception e) { ZLog.W("run setup postfix fail " + e.Message); }
         }
 
         public static void CharMaxAscensionPostfix(object __instance, ref int __result)
