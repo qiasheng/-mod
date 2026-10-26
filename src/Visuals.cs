@@ -2160,10 +2160,11 @@ void fragment() {
                 StopTransform();
                 // 3.3.19：变身演出开关（user://zhiji_prefs.json）
                 ZhijiPrefs.Load();
-                if (folder == "transform" && !ZhijiPrefs.AnimOn)
+                // 3.3.27：开关对**所有**变形演出生效（含 transform_back 与任何调用方）
+                if (!ZhijiPrefs.AnimOn)
                 {
-                    TransformPlayed++;
-                    ZLog.W("transform anim disabled, skip (#" + TransformPlayed + ")");
+                    if (folder == "transform") TransformPlayed++;
+                    ZLog.W("transform anim disabled, skip folder=" + folder + " (#" + TransformPlayed + ")");
                     return;
                 }
                 // 第二次及以后：原地变身，不再放全屏演出

@@ -648,7 +648,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.26");
+                ZLog.W("entry build 3.3.27");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
