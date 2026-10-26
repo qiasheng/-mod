@@ -30,6 +30,7 @@ namespace Zhiji
                 if (z != null && z.RedGod) continue;          // 红神卡只通过变身获得
                 if (c is ChildhoodEnd) continue;              // 饥饿满100自动发放
                 if (c is HungerFeast) continue;               // 作弊卡只在初始牌组，不进奖励
+                if (c is TestOstySummon) continue;            // 3.3.9：测试卡不进玩家卡池
                 list.Add(c);
             }
             // 保证 普通/罕见/稀有 三档都至少有一张，否则奖励生成会抛 "couldn't generate a valid rarity"

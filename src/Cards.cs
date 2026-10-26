@@ -90,36 +90,44 @@ namespace Zhiji
             }
             catch (Exception e) { ZLog.W("upgrade bump fail " + e.Message); }
             // 没有任何数值可加：降 1 费（最低 0）
+            // 旧实现靠反射找 BaseValue/SetBaseValue，两个都不存在时静默失败（done=False，升级等于没升）。
+            // CardEnergyCost 提供了正规入口：UpgradeBy(减量) + FinalizeUpgrade()。
             if (!bumped)
             {
-                try
+                var ec = EnergyCost;
+                bool done = false;
+                if (ec != null)
                 {
-                    var ec = EnergyCost;
-                    bool done = false;
-                    if (ec != null)
+                    try
                     {
-                        var tEc = ec.GetType();
-                        var piBase = tEc.GetProperty("BaseValue", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                        int before = ec.GetResolved();
+                        if (before > 0)
+                        {
+                            ec.UpgradeBy(-1);
+                            try { ec.FinalizeUpgrade(); } catch { }
+                            done = ec.GetResolved() < before;
+                        }
+                        else { done = true; }   // 0 费卡：无需降费
+                    }
+                    catch (Exception e3) { ZLog.W("upgrade cost api fail " + Id.Entry + " " + e3.Message); }
+                }
+                if (!done)
+                {
+                    // 兜底：老的反射路径（某些自定义费用模型可能只暴露 BaseValue）
+                    try
+                    {
+                        var tEc = ec != null ? ec.GetType() : null;
+                        var piBase = tEc != null ? tEc.GetProperty("BaseValue", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance) : null;
                         if (piBase != null && piBase.CanWrite)
                         {
                             int cur = Convert.ToInt32(piBase.GetValue(ec));
-                            piBase.SetValue(ec, Math.Max(0, cur - 1)); done = true;
-                        }
-                        if (!done)
-                        {
-                            var mSet = tEc.GetMethod("SetBaseValue", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                            if (mSet != null)
-                            {
-                                int cur = 0;
-                                try { cur = (int)mSet.GetParameters()[0].ParameterType.Name.Length; } catch { }
-                                try { cur = ec.GetAmountToSpend(); } catch { }
-                                mSet.Invoke(ec, new object[] { Math.Max(0, cur - 1) }); done = true;
-                            }
+                            piBase.SetValue(ec, Math.Max(0, cur - 1));
+                            done = true;
                         }
                     }
-                    ZLog.W("upgrade fallback cost reduce done=" + done);
+                    catch { }
                 }
-                catch (Exception e2) { ZLog.W("upgrade cost fail " + e2.Message); }
+                ZLog.W("upgrade fallback cost reduce done=" + done + " card=" + Id.Entry + " cost=" + (ec != null ? ec.GetResolved().ToString() : "-"));
             }
             try { OnCustomUpgrade(); } catch (Exception e2) { ZLog.W("custom upgrade fail " + e2.Message); }
         }

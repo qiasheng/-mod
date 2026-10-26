@@ -1,7 +1,14 @@
-*.dll
-*.pdb
-*.user
+# 构建产物
 bin/
 obj/
 gen/
+*.dll
+*.pdb
+*.user
 *.zip
+
+# 本地游戏程序集引用（每台机器自己放）
+refs/
+
+# 交接文档不公开
+HANDOVER.md

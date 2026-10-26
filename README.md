@@ -14,18 +14,24 @@
 3. 解压到游戏的 `mods/` 下，确保路径为 `mods/zhiji/zhiji.dll` 与 `mods/zhiji/zhiji.json`；
 4. 启动游戏，日志出现 `entry build <版本>` 即加载成功。
 
-日志位置：`Android/data/com.megacrit.sts2re/files/zhiji_log.txt`（Android）
-或 `%APPDATA%/SlayTheSpire2/logs/`（桌面）。
+日志位置：
+
+- Android：`Android/data/com.megacrit.sts2re/files/zhiji_log.txt`
+- Linux：`~/.local/share/SlayTheSpire2/zhiji_log.txt`（3.3.2 起）
+- Windows：不写文件（避免每次日志触发一次异常，见 `docs/实现参数.md` §254.3）
 
 ## 构建（开发者）
 
-依赖：.NET SDK 8、游戏程序集（`sts2.dll` 及同目录 dll）。
+依赖：**.NET SDK 9**（游戏程序集是 `net9.0`）+ 游戏程序集（`sts2.dll` 及同目录 dll）+ `GodotSharp.dll`。
 
 ```bash
-DOTNET_EnableWriteXorExecute=0 \
-DOTNET_GCHeapHardLimit=0x20000000 \
-DOTNET_gcServer=0 \
-dotnet /usr/lib/dotnet/sdk/8.0.131/Roslyn/bincore/csc.dll @build.rsp
+# 1) 把游戏 dll 放进 refs/（sts2.dll 及其同目录所有 dll），再从 Godot 4.5.1 mono 补一个 GodotSharp.dll
+mkdir -p refs
+cp "<游戏>/data_sts2_linuxbsd_x86_64/"*.dll refs/
+cp "<Godot mono>/GodotSharp/Api/Release/GodotSharp.dll" refs/
+
+# 2) 构建
+dotnet build zhiji.csproj          # 产物 bin/zhiji.dll
 ```
 
 产物 `zhiji.dll`，与 `pkg/zhiji/` 一起打包为 mod：
@@ -34,7 +40,8 @@ dotnet /usr/lib/dotnet/sdk/8.0.131/Roslyn/bincore/csc.dll @build.rsp
 tar czf zhiji.zip -C pkg zhiji
 ```
 
-> `build.rsp` 里引用了游戏程序集路径，请按本机路径调整。
+> `build.rsp`（旧版 `csc @build.rsp` 用法）保留作参考，里面是容器绝对路径，PC 上请用 `zhiji.csproj`。
+> 本机无头测试流程见 `RUNBOOK-linux.md`。
 
 ## 目录结构
 

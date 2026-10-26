@@ -353,6 +353,18 @@ namespace Zhiji
                     _statLayer.AddChild(tmr);
                 }
                 catch (Exception eT) { ZLog.W("thought timer fail " + eT.Message); }
+                // 死亡结算专用快 tick（0.15s）：0.7s 的常规 tick 会让死亡收尾拖到 2s+
+                try
+                {
+                    var tmrD = new Godot.Timer();
+                    tmrD.WaitTime = 0.15;
+                    tmrD.Autostart = true;
+                    tmrD.OneShot = false;
+                    tmrD.Timeout += () => ZhijiPatcher.TickDeathSettle();
+                    _statLayer.AddChild(tmrD);
+                    ZLog.W("death settle timer ready");
+                }
+                catch (Exception eD) { ZLog.W("death timer fail " + eD.Message); }
                 ZLog.W("stat panel ready");
             }
             catch (Exception e) { ZLog.W("stat panel fail " + e.Message); }
@@ -402,23 +414,11 @@ namespace Zhiji
                 var rm = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
                 var rs = rm != null ? rm.DebugOnlyGetState() : null;
                 var pl = rs != null && rs.Players != null && rs.Players.Count > 0 ? rs.Players[0] : null;
-                // HP 归零兜底：引擎偶尔不走死亡结算（自伤/调试），这里主动触发一次
+                // HP 归零兜底：引擎偶尔不走死亡结算（自伤/调试），统一交给 ZhijiPatcher 处理
                 try
                 {
                     if (pl != null && pl.Creature != null && !pl.Creature.IsDead && (int)pl.Creature.CurrentHp <= 0)
-                    {
-                        var stD = ZhijiStore.Of(pl);
-                        if (!stD.DeathHandled)
-                        {
-                            stD.DeathHandled = true;
-                            var cm = MegaCrit.Sts2.Core.Combat.CombatManager.Instance;
-                            if (cm != null)
-                            {
-                                ZLog.W("hp<=0 detected in tick -> HandlePlayerDeath");
-                                _ = cm.HandlePlayerDeath(cm.CurrentCombatId, pl);
-                            }
-                        }
-                    }
+                        ZhijiPatcher.EnsureDeathSettled(pl, "visual-tick");
                 }
                 catch { }
                 // 玩家死亡：隐藏所有自绘层，避免残留在结算界面
@@ -516,6 +516,8 @@ namespace Zhiji
                 }
                 catch { }
                 if (room == null) room = FindNodeByTypeName(tree.Root, "NEventRoom", 0);
+                // 事件房可能在两次 tick 之间被释放：对已释放的 Godot 对象调 GetChildren 会原生段错误
+                if (room == null || !GodotObject.IsInstanceValid(room)) { _eventArtDumped = false; return; }
                 if (room == null)
                 {
                     if (!_eventArtDumped)
@@ -543,9 +545,59 @@ namespace Zhiji
                         try { tr.Texture = tex; applied++; } catch { }
                     }
                 }
-                if (!_eventArtDumped) { ZLog.W("event art walk: room=" + room.Name + " texrects=" + seen + " applied=" + applied); _eventArtDumped = true; }
+                int hid = HideVanillaEventDecor(room, !_eventArtDumped);
+                if (!_eventArtDumped) { ZLog.W("event art walk: room=" + room.Name + " texrects=" + seen + " applied=" + applied + " hidden=" + hid); _eventArtDumped = true; }
             }
             catch (Exception e) { if (!_eventArtDumped) { ZLog.W("event art tick fail " + e.Message); _eventArtDumped = true; } }
+        }
+
+        // 隐藏原版事件场景的前景剪影 / 特效层（藤蔓 DenseVegetationForeground、虫子、雾与落叶粒子）
+        // 这些不是 TextureRect，旧逻辑漏掉 → 换完背景仍叠在画面上（待办 #5）
+        public static int HideVanillaEventDecor(Godot.Node room, bool log)
+        {
+            int hid = 0;
+            try
+            {
+                if (room == null || !GodotObject.IsInstanceValid(room)) return 0;
+                var stack = new Stack<Godot.Node>();
+                stack.Push(room);
+                while (stack.Count > 0)
+                {
+                    var n = stack.Pop();
+                    if (n == null || !GodotObject.IsInstanceValid(n)) continue;
+                    foreach (var ch in n.GetChildren()) if (ch is Godot.Node cn) stack.Push(cn);
+                    var nm = n.Name.ToString();
+                    bool target = nm.EndsWith("Vfx") || nm.Contains("Foreground") || nm == "VfxContainer" || nm == "dark_overlay";
+                    if (!target || !(n is Godot.CanvasItem ci)) continue;
+                    if (!ci.Visible) continue;
+                    ci.Visible = false;
+                    hid++;
+                    if (log) ZLog.W("event art hide scene node " + n.GetType().Name + " '" + nm + "'");
+                }
+            }
+            catch (Exception e) { if (log) ZLog.W("hide event decor fail " + e.Message); }
+            return hid;
+        }
+
+        public static Godot.Node FindRoomNodePublic(Godot.Node n, string typeName, int depth)
+        {
+            return FindNodeByTypeName(n, typeName, depth);
+        }
+
+        // 事件节点树 dump：类型 / 名字 / 可见 / 尺寸（用于定位原版剪影/特效残留）
+        public static void DumpNodeTree(Godot.Node n, int depth, int maxDepth)
+        {
+            try
+            {
+                if (n == null || !GodotObject.IsInstanceValid(n) || depth > maxDepth) return;
+                string sz = "";
+                if (n is Godot.Control c) sz = " size=" + c.Size.X.ToString("0") + "x" + c.Size.Y.ToString("0");
+                else if (n is Godot.Sprite2D sp) sz = " tex=" + (sp.Texture != null ? sp.Texture.GetWidth() + "x" + sp.Texture.GetHeight() : "null") + " pos=" + sp.Position.X.ToString("0") + "," + sp.Position.Y.ToString("0");
+                else if (n is Godot.AnimatedSprite2D asp) sz = " frames=" + (asp.SpriteFrames != null ? "yes" : "null");
+                ZLog.W("evdump " + new string(' ', depth) + n.GetType().Name + " '" + n.Name + "' vis=" + (n is Godot.CanvasItem ci ? ci.Visible.ToString() : "?") + sz);
+                foreach (var ch in n.GetChildren()) DumpNodeTree(ch, depth + 1, maxDepth);
+            }
+            catch { }
         }
 
         static void DumpEventNodes(Godot.Node n, int depth)
@@ -568,7 +620,6 @@ namespace Zhiji
 
         static void UpdateMapThought()
         {
-            try { ZhijiPatcher.TryEmergencyDeath(); } catch { }
             try { ApplyEventArtTick(); } catch { }
             try { ZhijiPatcher.TryConsumeAutoPlay(); } catch { }
             try { UpdateOstySkin(); } catch { }
@@ -931,9 +982,9 @@ namespace Zhiji
                 {
                     try
                     {
-                        if (_flashRect != null) _flashRect.Color = new Color(1f, 1f, 1f, peak);
+                        if (_flashRect != null && GodotObject.IsInstanceValid(_flashRect)) _flashRect.Color = new Color(1f, 1f, 1f, peak);
                         var t2 = tree.CreateTimer(down);
-                        t2.Timeout += () => { try { if (_flashRect != null) _flashRect.Color = new Color(1f, 1f, 1f, 0f); } catch { } };
+                        t2.Timeout += () => { try { if (_flashRect != null && GodotObject.IsInstanceValid(_flashRect)) _flashRect.Color = new Color(1f, 1f, 1f, 0f); } catch { } };
                     }
                     catch { }
                 };
@@ -1163,6 +1214,137 @@ namespace Zhiji
             _overlaySc = sc;
         }
 
+        // ===== 死亡贴图（3.3.3）=====
+        // 玩家死亡后不再显示原版角色立绘（观感割裂），改为「肉堆 + 红冠」：
+        // 常态 art/death_kid.png，红神 art/death_red.png。
+        static Sprite2D _deathSprite;
+        static bool _deathWanted;
+
+        public static bool DeathSpriteVisible()
+        {
+            try { return _deathSprite != null && GodotObject.IsInstanceValid(_deathSprite) && _deathSprite.Visible; }
+            catch { return false; }
+        }
+
+        static void EnsureSpriteLayer()
+        {
+            try
+            {
+                var tree = Engine.GetMainLoop() as SceneTree;
+                if (tree == null) return;
+                if (_layer != null && GodotObject.IsInstanceValid(_layer)) return;
+                var watcher = new OverlayWatcher();
+                watcher.Name = "ZhijiOverlayWatcher";
+                tree.Root.AddChild(watcher);
+                _layer = new CanvasLayer();
+                _layer.Name = "ZhijiSpriteLayer";
+                _layer.Layer = 1;
+                tree.Root.AddChild(_layer);
+            }
+            catch { }
+        }
+
+        // 结算/战败界面是否已经出现（RunManager 标记 + 顶层 overlay 类型）
+        static bool GameOverUp()
+        {
+            try
+            {
+                var rm = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                if (rm != null && rm.IsGameOver) return true;
+            }
+            catch { }
+            try
+            {
+                var st = MegaCrit.Sts2.Core.Nodes.Screens.Overlays.NOverlayStack.Instance;
+                if (st != null && GodotObject.IsInstanceValid(st))
+                {
+                    var peek = st.Peek();
+                    if (peek != null && peek.GetType().Name.Contains("GameOver")) return true;
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        // 结算界面出现：mod 自绘层全部收起（死亡贴图保留，作为战败背景）
+        public static void HideAllSelfDrawn(string why)
+        {
+            try
+            {
+                HideOverlay();
+                Godot.CanvasLayer[] layers = { _statLayer, _fxLayer, _zoomLayer, _choiceLayer };
+                int n = 0;
+                foreach (var cl in layers)
+                {
+                    if (cl == null || !GodotObject.IsInstanceValid(cl)) continue;
+                    if (!cl.Visible) continue;
+                    cl.Visible = false;
+                    n++;
+                }
+                ZLog.W("self-drawn hidden (" + why + ") n=" + n);
+            }
+            catch (Exception e) { ZLog.W("hide self-drawn fail " + e.Message); }
+        }
+
+        public static void ShowDeathSprite(bool red)
+        {
+            try
+            {
+                EnsureSpriteLayer();
+                var tree = Engine.GetMainLoop() as SceneTree;
+                if (tree == null || _layer == null || !GodotObject.IsInstanceValid(_layer)) return;
+                var tex = Art.Get(red ? "death_red" : "death_kid");
+                if (tex == null) { ZLog.W("death art missing red=" + red); return; }
+                if (_deathSprite == null || !GodotObject.IsInstanceValid(_deathSprite))
+                {
+                    _deathSprite = new Sprite2D();
+                    _deathSprite.Name = "ZhijiDeath";
+                    _layer.AddChild(_deathSprite);
+                }
+                _deathSprite.Texture = tex;
+                _deathSprite.Centered = true;
+                _deathSprite.FlipH = false;
+                var vp = tree.Root.GetVisibleRect().Size;
+                float h = vp.Y * (red ? 0.135f : 0.125f);
+                float sc = h / System.Math.Max(1f, tex.GetHeight());
+                _deathSprite.Scale = new Vector2(sc, sc);
+                float groundY = vp.Y * 0.63f;
+                float centerX = vp.X * 0.195f;
+                try
+                {
+                    var cmO = MegaCrit.Sts2.Core.Combat.CombatManager.Instance;
+                    var stO = cmO != null ? cmO.DebugOnlyGetState() : null;
+                    var plO = stO != null && stO.Players != null && stO.Players.Count > 0 ? stO.Players[0] : null;
+                    var ncO = plO != null && plO.Creature != null ? plO.Creature.GetCreatureNode() : null;
+                    if (ncO != null && GodotObject.IsInstanceValid(ncO))
+                    {
+                        var gp = ncO.GetGlobalTransformWithCanvas().Origin;
+                        if (gp.X > 1 && gp.Y > 1) { centerX = gp.X; groundY = gp.Y; }
+                    }
+                }
+                catch { }
+                _deathSprite.Position = new Vector2(centerX, groundY - h * 0.5f);
+                _deathSprite.ZIndex = 6;
+                _deathSprite.Visible = true;
+                _deathWanted = true;
+                ZLog.W("death sprite " + (red ? "red" : "kid") + " h=" + h.ToString("0") + " pos="
+                    + centerX.ToString("0") + "," + (_deathSprite.Position.Y).ToString("0"));
+            }
+            catch (Exception e) { ZLog.W("death sprite fail " + e.Message); }
+        }
+
+        public static void HideDeathSprite(string why)
+        {
+            try
+            {
+                _deathWanted = false;
+                bool was = _deathSprite != null && GodotObject.IsInstanceValid(_deathSprite) && _deathSprite.Visible;
+                if (_deathSprite != null && GodotObject.IsInstanceValid(_deathSprite)) _deathSprite.Visible = false;
+                if (was && !string.IsNullOrEmpty(why)) ZLog.W("death sprite hidden (" + why + ")");
+            }
+            catch { }
+        }
+
         public static void Warmup()
         {
             try
@@ -1189,8 +1371,11 @@ namespace Zhiji
         {
             if (n == null || depth > 12) return false;
             var tn = n.GetType().Name;
-            if (n is Godot.CanvasItem ci && ci.Visible)
+            if (n is Godot.CanvasItem ci)
+            {
+                if (!ci.Visible) return false;      // 父节点不渲染，子树也看不到 → 直接剪枝
                 foreach (var t in BlockingUiTypes) if (tn == t) return true;
+            }
             foreach (var ch in n.GetChildren()) if (ch is Godot.Node cn) { if (FindVisibleUi(cn, depth + 1)) return true; }
             return false;
         }
@@ -1232,10 +1417,16 @@ namespace Zhiji
             catch { }
         }
 
+        public static long OcclusionIntervalMs = 150;   // 调试可设为 0 测原始开销
+        static long _lastOcclusion;
         public static void SyncUiOcclusion()
         {
             try
             {
+                // 每帧调用太浪费：150ms 一次足够（界面开合不会更快）
+                long nowO = System.Environment.TickCount64;
+                if (OcclusionIntervalMs > 0 && nowO - _lastOcclusion < OcclusionIntervalMs) return;
+                _lastOcclusion = nowO;
                 var tree = Engine.GetMainLoop() as SceneTree;
                 if (tree == null) return;
                 bool blocked = FindVisibleUi(tree.Root, 0);
@@ -1276,7 +1467,10 @@ namespace Zhiji
                     _layer.Layer = 1;
                     tree.Root.AddChild(_layer);
                 }
+                // 结算/战败界面期间不允许再弹出立绘（否则会盖住分数面板）
+                if (GameOverUp()) { ZLog.W("overlay skipped (game over screen up)"); return; }
                 _red = red;                                  // ← 每次显示都按真实形态重置，避免沿用上一局的标记
+                if (_deathWanted || DeathSpriteVisible()) HideDeathSprite("overlay shown");
                 if (_overlay == null || !GodotObject.IsInstanceValid(_overlay))
                 {
                     _overlay = new AnimatedSprite2D();
@@ -1866,6 +2060,94 @@ void fragment() {
 
         static string _animFolder = "transform";
 
+        // ===== 变身帧后台预取（3.3.6）=====
+        // 实测（PC/Xvfb）：单帧 File+Webp 解码+建纹理 avg 5ms / max 10ms（t:bench:30 → 149ms/30）。
+        // 播放是按真实时间跳帧的（低帧率时一次跳很多帧），所以"顺序预取"命中率极低；
+        // 这里改为**单槽预测**：主线程每 tick 预测下一帧号，后台线程只解码那一帧。
+        static readonly System.Collections.Generic.Dictionary<int, Godot.Image> _pre =
+            new System.Collections.Generic.Dictionary<int, Godot.Image>();
+        static readonly object _preLock = new object();
+        static System.Threading.Thread _preThread;
+        static volatile int _preToken;
+        static volatile int _preWant = -1;        // 主线程写入的"想要的帧号"
+        static string _preFolder;
+        const int PreBufferMax = 4;               // 最多缓存 4 帧（1280x720 RGBA ≈ 3.7MB/帧）
+        static int _animPrefetchHits, _animTotalFrames, _animStalls, _animMaxFrameMs;
+        static int _animLastIndex;
+        public static bool NoPrefetch;            // 调试：true = 走旧的同步逐帧加载
+
+        static void StopPrefetch()
+        {
+            try
+            {
+                _preToken++;
+                _preThread = null;
+                _preWant = -1;
+                lock (_preLock)
+                {
+                    foreach (var kv in _pre) { try { kv.Value?.Dispose(); } catch { } }
+                    _pre.Clear();
+                }
+            }
+            catch { }
+        }
+
+        static void StartPrefetch(string folder)
+        {
+            try
+            {
+                StopPrefetch();
+                _preFolder = folder;
+                int token = _preToken;
+                _preThread = new System.Threading.Thread(() =>
+                {
+                    try
+                    {
+                        while (token == _preToken)
+                        {
+                            int want = _preWant;
+                            if (want < 0 || want > 900) { System.Threading.Thread.Sleep(2); continue; }
+                            bool have;
+                            lock (_preLock) have = _pre.ContainsKey(want);
+                            if (have) { System.Threading.Thread.Sleep(2); continue; }
+                            var img = Art.GetImage(folder, want);
+                            if (img == null) { System.Threading.Thread.Sleep(5); continue; }
+                            lock (_preLock)
+                            {
+                                if (!_pre.ContainsKey(want)) _pre[want] = img;
+                                else { try { img.Dispose(); } catch { } }
+                                // 缓存超限：丢掉最旧的
+                                while (_pre.Count > PreBufferMax)
+                                {
+                                    int oldest = int.MaxValue;
+                                    foreach (var k in _pre.Keys) if (k < oldest) oldest = k;
+                                    try { _pre[oldest]?.Dispose(); } catch { }
+                                    _pre.Remove(oldest);
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                });
+                _preThread.IsBackground = true;
+                _preThread.Start();
+            }
+            catch (Exception e) { ZLog.W("prefetch start fail " + e.Message); }
+        }
+
+        // 主线程取一帧已解码的图（无则返回 null，调用方回退到同步加载）
+        static Godot.Texture2D TakePrefetched(int index)
+        {
+            Godot.Image img = null;
+            lock (_preLock)
+            {
+                if (_pre.TryGetValue(index, out img)) _pre.Remove(index);
+            }
+            if (img == null) return null;
+            try { return Godot.ImageTexture.CreateFromImage(img); }
+            finally { try { img.Dispose(); } catch { } }
+        }
+
         public static int TransformPlayed;
         public static void ResetTransformCount() { TransformPlayed = 0; }
 
@@ -1900,7 +2182,10 @@ void fragment() {
                 _animRect.Texture = first;
                 _animLayer.AddChild(_animRect);
                 _animIndex = 0;
+                _animLastIndex = 0;
                 _animTotal = 0;
+                _animPrefetchHits = 0; _animTotalFrames = 0; _animStalls = 0; _animMaxFrameMs = 0;
+                if (!NoPrefetch) StartPrefetch(folder);
                 _animStartMs = Godot.Time.GetTicksMsec();
                 _animTimer = new Timer();
                 _animTimer.WaitTime = 1.0 / 30.0;
@@ -1932,13 +2217,32 @@ void fragment() {
                 int target = (int)((now - _animStartMs) / 1000.0 * 30.0);
                 if (target > _animIndex) _animIndex = target;
                 else _animIndex++;
-                var tex = Art.GetSequence(_animFolder, _animIndex);
+                ulong t0 = Godot.Time.GetTicksMsec();
+                // 预测下一帧号：按上一次 tick 的跳帧步长
+                try
+                {
+                    int step = _animIndex - _animLastIndex;
+                    if (step < 1) step = 1;
+                    _preWant = _animIndex + step;
+                }
+                catch { }
+                var tex = TakePrefetched(_animIndex);
+                bool hit = tex != null;
+                if (tex == null) tex = Art.GetSequence(_animFolder, _animIndex);
+                ulong cost = Godot.Time.GetTicksMsec() - t0;
                 if (tex == null || _animIndex > 900)
                 {
-                    ZLog.W("transform anim done at " + _animIndex);
+                    ZLog.W("transform anim done at " + _animIndex
+                        + " frames=" + _animTotalFrames + " prefetchHits=" + _animPrefetchHits
+                        + " stalls=" + _animStalls + " maxFrameMs=" + _animMaxFrameMs);
                     StopTransform();
                     return;
                 }
+                if (hit) _animPrefetchHits++;
+                _animLastIndex = _animIndex;
+                _animTotalFrames++;
+                if ((int)cost > _animMaxFrameMs) _animMaxFrameMs = (int)cost;
+                if (cost > 12ul) _animStalls++;
                 _animRect.Texture = tex;
             }
             catch (Exception e) { ZLog.W("anim tick fail " + e.Message); StopTransform(); }
@@ -1948,6 +2252,7 @@ void fragment() {
         {
             try
             {
+                StopPrefetch();
                 if (_animTimer != null && GodotObject.IsInstanceValid(_animTimer)) { _animTimer.Stop(); _animTimer.QueueFree(); }
                 _animTimer = null;
                 if (_animLayer != null && GodotObject.IsInstanceValid(_animLayer)) _animLayer.QueueFree();

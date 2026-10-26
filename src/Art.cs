@@ -81,6 +81,26 @@ namespace Zhiji
             return null;
         }
 
+        // 只解码不建纹理（给后台线程预取用；调用方负责 Dispose）
+        public static Image GetImage(string folder, int index)
+        {
+            try
+            {
+                string dir = Path.Combine(Dir(), folder);
+                foreach (var ext in new[] { ".webp", ".png" })
+                {
+                    string f = Path.Combine(dir, "frame_" + index.ToString("0000") + ext);
+                    if (!File.Exists(f)) continue;
+                    var img = new Image();
+                    var err = ext == ".webp" ? img.LoadWebpFromBuffer(File.ReadAllBytes(f)) : img.LoadPngFromBuffer(File.ReadAllBytes(f));
+                    if (err == Error.Ok) return img;
+                    try { img.Dispose(); } catch { }
+                }
+            }
+            catch { }
+            return null;
+        }
+
         public static Texture2D Get(string entry)
         {
             if (string.IsNullOrEmpty(entry)) return null;

@@ -12,6 +12,55 @@ using MegaCrit.Sts2.Core.Models;
 
 namespace Zhiji
 {
+
+    // 事件选项兜底（3.3.11）：自建事件的选项回调是 fire-and-forget 的 async，
+    // 一旦抛异常就不会调用 SetEventFinished → 玩家卡在选项页。
+    // 规则：只有"抛异常"才强制结算；正常返回但没结算（商店/翻页）保持原样，只记日志。
+    public static class EvGuard
+    {
+        public static void ForceFinish(MegaCrit.Sts2.Core.Models.EventModel ev, string key)
+        {
+            try
+            {
+                var m = typeof(MegaCrit.Sts2.Core.Models.EventModel).GetMethod("SetEventFinished",
+                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+                if (m != null) m.Invoke(ev, new object[] { new LocString("events", key) });
+                else ZLog.W("evguard: SetEventFinished not found");
+            }
+            catch (Exception e) { ZLog.W("evguard finish fail " + e.GetBaseException().Message); }
+        }
+
+        public static Func<Task> Wrap(MegaCrit.Sts2.Core.Models.EventModel ev, string fallbackKey, string tag, Func<Task> body)
+        {
+            return async () =>
+            {
+                bool failed = false;
+                try { await body(); }
+                catch (Exception e)
+                {
+                    failed = true;
+                    ZLog.W(tag + " option fail " + e.GetBaseException().Message);
+                }
+                finally
+                {
+                    try
+                    {
+                        if (failed && !ev.IsFinished)
+                        {
+                            ZLog.W(tag + " option failed -> force finish");
+                            ForceFinish(ev, fallbackKey);
+                        }
+                        else if (!failed && !ev.IsFinished)
+                        {
+                            ZLog.W(tag + " option returned without finish (kept open)");
+                        }
+                    }
+                    catch (Exception e2) { ZLog.W(tag + " force finish fail " + e2.Message); }
+                }
+            };
+        }
+    }
+
     /// 阴暗饭馆：借用第一层一个原生事件的外观/场景，替换标题、描述与选项。
     public static class DinerEvent
     {
@@ -24,8 +73,8 @@ namespace Zhiji
 
         public static IReadOnlyList<EventOption> BuildOptions(EventModel ev)
         {
-            var eat = new EventOption(ev, () => Eat(ev), L("DARK_DINER.options.EAT.title"), L("DARK_DINER.options.EAT.description"), "EAT", System.Array.Empty<IHoverTip>());
-            var leave = new EventOption(ev, () => Leave(ev), L("DARK_DINER.options.LEAVE.title"), L("DARK_DINER.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
+            var eat = new EventOption(ev, EvGuard.Wrap(ev, "DARK_DINER.pages.INITIAL.description", "diner", () => Eat(ev)), L("DARK_DINER.options.EAT.title"), L("DARK_DINER.options.EAT.description"), "EAT", System.Array.Empty<IHoverTip>());
+            var leave = new EventOption(ev, EvGuard.Wrap(ev, "DARK_DINER.pages.INITIAL.description", "diner", () => Leave(ev)), L("DARK_DINER.options.LEAVE.title"), L("DARK_DINER.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
             return new List<EventOption> { eat, leave };
         }
 
@@ -78,7 +127,7 @@ namespace Zhiji
                     }
                     catch (Exception eO) { ZLog.W("diner open shop fail " + eO.Message); }
                 }, L("DARK_DINER.options.OPEN_SHOP.title"), L("DARK_DINER.options.OPEN_SHOP.description"), "OPEN_SHOP", System.Array.Empty<IHoverTip>()));
-                opts.Add(new EventOption(ev, () => Leave(ev), L("DARK_DINER.options.LEAVE.title"), L("DARK_DINER.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>()));
+                opts.Add(new EventOption(ev, EvGuard.Wrap(ev, "DARK_DINER.pages.INITIAL.description", "diner", () => Leave(ev)), L("DARK_DINER.options.LEAVE.title"), L("DARK_DINER.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>()));
 
                 var m = typeof(EventModel).GetMethod("SetEventState", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
                 if (m != null)
@@ -184,7 +233,7 @@ namespace Zhiji
 
         static async Task Leave(EventModel ev)
         {
-            Finish(ev, "DARK_DINER.pages.LEAVE.description");
+            Finish(ev, "RED_HEART.pages.LEAVE.description");   // 3.3.10：原来错用了 DARK_DINER 的 key
             await Task.CompletedTask;
         }
     }
@@ -200,10 +249,10 @@ namespace Zhiji
 
         public static IReadOnlyList<EventOption> BuildOptions(EventModel ev)
         {
-            var lie = new EventOption(ev, () => Lie(ev), L("RED_CRADLE.options.LIE.title"), L("RED_CRADLE.options.LIE.description"), "LIE", System.Array.Empty<IHoverTip>());
-            var tear = new EventOption(ev, () => Tear(ev), L("RED_CRADLE.options.TEAR.title"), L("RED_CRADLE.options.TEAR.description"), "TEAR", System.Array.Empty<IHoverTip>());
-            var contract = new EventOption(ev, () => Contract(ev), L("RED_CRADLE.options.CONTRACT.title"), L("RED_CRADLE.options.CONTRACT.description"), "CONTRACT", System.Array.Empty<IHoverTip>());
-            var leave = new EventOption(ev, () => Leave(ev), L("RED_CRADLE.options.LEAVE.title"), L("RED_CRADLE.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
+            var lie = new EventOption(ev, EvGuard.Wrap(ev, "RED_CRADLE.pages.INITIAL.description", "redcradle", () => Lie(ev)), L("RED_CRADLE.options.LIE.title"), L("RED_CRADLE.options.LIE.description"), "LIE", System.Array.Empty<IHoverTip>());
+            var tear = new EventOption(ev, EvGuard.Wrap(ev, "RED_CRADLE.pages.INITIAL.description", "redcradle", () => Tear(ev)), L("RED_CRADLE.options.TEAR.title"), L("RED_CRADLE.options.TEAR.description"), "TEAR", System.Array.Empty<IHoverTip>());
+            var contract = new EventOption(ev, EvGuard.Wrap(ev, "RED_CRADLE.pages.INITIAL.description", "redcradle", () => Contract(ev)), L("RED_CRADLE.options.CONTRACT.title"), L("RED_CRADLE.options.CONTRACT.description"), "CONTRACT", System.Array.Empty<IHoverTip>());
+            var leave = new EventOption(ev, EvGuard.Wrap(ev, "RED_CRADLE.pages.INITIAL.description", "redcradle", () => Leave(ev)), L("RED_CRADLE.options.LEAVE.title"), L("RED_CRADLE.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
             return new List<EventOption> { lie, tear, contract, leave };
         }
 
@@ -346,10 +395,10 @@ namespace Zhiji
 
         public static IReadOnlyList<EventOption> BuildOptions(EventModel ev)
         {
-            var offer = new EventOption(ev, () => Offer(ev), L("RED_CHURCH.options.OFFER.title"), L("RED_CHURCH.options.OFFER.description"), "OFFER", System.Array.Empty<IHoverTip>());
-            var listen = new EventOption(ev, () => Listen(ev), L("RED_CHURCH.options.LISTEN.title"), L("RED_CHURCH.options.LISTEN.description"), "LISTEN", System.Array.Empty<IHoverTip>());
-            var smash = new EventOption(ev, () => Smash(ev), L("RED_CHURCH.options.SMASH.title"), L("RED_CHURCH.options.SMASH.description"), "SMASH", System.Array.Empty<IHoverTip>());
-            var leave = new EventOption(ev, () => Leave(ev), L("RED_CHURCH.options.LEAVE.title"), L("RED_CHURCH.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
+            var offer = new EventOption(ev, EvGuard.Wrap(ev, "RED_CHURCH.pages.INITIAL.description", "redchurch", () => Offer(ev)), L("RED_CHURCH.options.OFFER.title"), L("RED_CHURCH.options.OFFER.description"), "OFFER", System.Array.Empty<IHoverTip>());
+            var listen = new EventOption(ev, EvGuard.Wrap(ev, "RED_CHURCH.pages.INITIAL.description", "redchurch", () => Listen(ev)), L("RED_CHURCH.options.LISTEN.title"), L("RED_CHURCH.options.LISTEN.description"), "LISTEN", System.Array.Empty<IHoverTip>());
+            var smash = new EventOption(ev, EvGuard.Wrap(ev, "RED_CHURCH.pages.INITIAL.description", "redchurch", () => Smash(ev)), L("RED_CHURCH.options.SMASH.title"), L("RED_CHURCH.options.SMASH.description"), "SMASH", System.Array.Empty<IHoverTip>());
+            var leave = new EventOption(ev, EvGuard.Wrap(ev, "RED_CHURCH.pages.INITIAL.description", "redchurch", () => Leave(ev)), L("RED_CHURCH.options.LEAVE.title"), L("RED_CHURCH.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
             return new List<EventOption> { offer, listen, smash, leave };
         }
 
@@ -452,9 +501,9 @@ namespace Zhiji
 
         public static IReadOnlyList<EventOption> BuildOptions(EventModel ev)
         {
-            var feast = new EventOption(ev, () => Feed(ev), L("CRIMSON_ALTAR.options.FEED.title"), L("CRIMSON_ALTAR.options.FEED.description"), "FEED", System.Array.Empty<IHoverTip>());
-            var fire = new EventOption(ev, () => Fire(ev), L("CRIMSON_ALTAR.options.FIRE.title"), L("CRIMSON_ALTAR.options.FIRE.description"), "FIRE", System.Array.Empty<IHoverTip>());
-            var leave = new EventOption(ev, () => Leave(ev), L("CRIMSON_ALTAR.options.LEAVE.title"), L("CRIMSON_ALTAR.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
+            var feast = new EventOption(ev, EvGuard.Wrap(ev, "CRIMSON_ALTAR.pages.INITIAL.description", "crimsonaltar", () => Feed(ev)), L("CRIMSON_ALTAR.options.FEED.title"), L("CRIMSON_ALTAR.options.FEED.description"), "FEED", System.Array.Empty<IHoverTip>());
+            var fire = new EventOption(ev, EvGuard.Wrap(ev, "CRIMSON_ALTAR.pages.INITIAL.description", "crimsonaltar", () => Fire(ev)), L("CRIMSON_ALTAR.options.FIRE.title"), L("CRIMSON_ALTAR.options.FIRE.description"), "FIRE", System.Array.Empty<IHoverTip>());
+            var leave = new EventOption(ev, EvGuard.Wrap(ev, "CRIMSON_ALTAR.pages.INITIAL.description", "crimsonaltar", () => Leave(ev)), L("CRIMSON_ALTAR.options.LEAVE.title"), L("CRIMSON_ALTAR.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
             return new List<EventOption> { feast, fire, leave };
         }
 
@@ -532,9 +581,9 @@ namespace Zhiji
 
         public static IReadOnlyList<EventOption> BuildOptions(EventModel ev)
         {
-            var buy = new EventOption(ev, () => Buy(ev), L("VILE_MARKET.options.BUY.title"), L("VILE_MARKET.options.BUY.description"), "BUY", System.Array.Empty<IHoverTip>());
-            var pledge = new EventOption(ev, () => Pledge(ev), L("VILE_MARKET.options.PLEDGE.title"), L("VILE_MARKET.options.PLEDGE.description"), "PLEDGE", System.Array.Empty<IHoverTip>());
-            var leave = new EventOption(ev, () => Leave(ev), L("VILE_MARKET.options.LEAVE.title"), L("VILE_MARKET.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
+            var buy = new EventOption(ev, EvGuard.Wrap(ev, "VILE_MARKET.pages.INITIAL.description", "vilemarket", () => Buy(ev)), L("VILE_MARKET.options.BUY.title"), L("VILE_MARKET.options.BUY.description"), "BUY", System.Array.Empty<IHoverTip>());
+            var pledge = new EventOption(ev, EvGuard.Wrap(ev, "VILE_MARKET.pages.INITIAL.description", "vilemarket", () => Pledge(ev)), L("VILE_MARKET.options.PLEDGE.title"), L("VILE_MARKET.options.PLEDGE.description"), "PLEDGE", System.Array.Empty<IHoverTip>());
+            var leave = new EventOption(ev, EvGuard.Wrap(ev, "VILE_MARKET.pages.INITIAL.description", "vilemarket", () => Leave(ev)), L("VILE_MARKET.options.LEAVE.title"), L("VILE_MARKET.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
             return new List<EventOption> { buy, pledge, leave };
         }
 
@@ -617,9 +666,9 @@ namespace Zhiji
 
         public static IReadOnlyList<EventOption> BuildOptions(EventModel ev)
         {
-            var offer = new EventOption(ev, () => Sample(ev), L("BLOOD_GIFT.options.SAMPLE.title"), L("BLOOD_GIFT.options.SAMPLE.description"), "SAMPLE", System.Array.Empty<IHoverTip>());
-            var shroud = new EventOption(ev, () => Wear(ev), L("BLOOD_GIFT.options.WEAR.title"), L("BLOOD_GIFT.options.WEAR.description"), "WEAR", System.Array.Empty<IHoverTip>());
-            var leave = new EventOption(ev, () => Leave(ev), L("BLOOD_GIFT.options.LEAVE.title"), L("BLOOD_GIFT.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
+            var offer = new EventOption(ev, EvGuard.Wrap(ev, "BLOOD_GIFT.pages.INITIAL.description", "bloodgift", () => Sample(ev)), L("BLOOD_GIFT.options.SAMPLE.title"), L("BLOOD_GIFT.options.SAMPLE.description"), "SAMPLE", System.Array.Empty<IHoverTip>());
+            var shroud = new EventOption(ev, EvGuard.Wrap(ev, "BLOOD_GIFT.pages.INITIAL.description", "bloodgift", () => Wear(ev)), L("BLOOD_GIFT.options.WEAR.title"), L("BLOOD_GIFT.options.WEAR.description"), "WEAR", System.Array.Empty<IHoverTip>());
+            var leave = new EventOption(ev, EvGuard.Wrap(ev, "BLOOD_GIFT.pages.INITIAL.description", "bloodgift", () => Leave(ev)), L("BLOOD_GIFT.options.LEAVE.title"), L("BLOOD_GIFT.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
             return new List<EventOption> { offer, shroud, leave };
         }
 
@@ -719,9 +768,9 @@ namespace Zhiji
 
         public static IReadOnlyList<EventOption> BuildOptions(EventModel ev)
         {
-            var act = new EventOption(ev, () => Act(ev), L("HUNGER_THEATER.options.ACT.title"), L("HUNGER_THEATER.options.ACT.description"), "ACT", System.Array.Empty<IHoverTip>());
-            var watch = new EventOption(ev, () => Watch(ev), L("HUNGER_THEATER.options.WATCH.title"), L("HUNGER_THEATER.options.WATCH.description"), "WATCH", System.Array.Empty<IHoverTip>());
-            var leave = new EventOption(ev, () => Leave(ev), L("HUNGER_THEATER.options.LEAVE.title"), L("HUNGER_THEATER.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
+            var act = new EventOption(ev, EvGuard.Wrap(ev, "HUNGER_THEATER.pages.INITIAL.description", "hungertheater", () => Act(ev)), L("HUNGER_THEATER.options.ACT.title"), L("HUNGER_THEATER.options.ACT.description"), "ACT", System.Array.Empty<IHoverTip>());
+            var watch = new EventOption(ev, EvGuard.Wrap(ev, "HUNGER_THEATER.pages.INITIAL.description", "hungertheater", () => Watch(ev)), L("HUNGER_THEATER.options.WATCH.title"), L("HUNGER_THEATER.options.WATCH.description"), "WATCH", System.Array.Empty<IHoverTip>());
+            var leave = new EventOption(ev, EvGuard.Wrap(ev, "HUNGER_THEATER.pages.INITIAL.description", "hungertheater", () => Leave(ev)), L("HUNGER_THEATER.options.LEAVE.title"), L("HUNGER_THEATER.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
             return new List<EventOption> { act, watch, leave };
         }
 
@@ -802,9 +851,9 @@ namespace Zhiji
 
         public static IReadOnlyList<EventOption> BuildOptions(EventModel ev)
         {
-            var war = new EventOption(ev, () => War(ev), L("WAR_COUNCIL.options.WAR.title"), L("WAR_COUNCIL.options.WAR.description"), "WAR", System.Array.Empty<IHoverTip>());
-            var guard = new EventOption(ev, () => Guard(ev), L("WAR_COUNCIL.options.GUARD.title"), L("WAR_COUNCIL.options.GUARD.description"), "GUARD", System.Array.Empty<IHoverTip>());
-            var leave = new EventOption(ev, () => Leave(ev), L("WAR_COUNCIL.options.LEAVE.title"), L("WAR_COUNCIL.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
+            var war = new EventOption(ev, EvGuard.Wrap(ev, "WAR_COUNCIL.pages.INITIAL.description", "warcouncil", () => War(ev)), L("WAR_COUNCIL.options.WAR.title"), L("WAR_COUNCIL.options.WAR.description"), "WAR", System.Array.Empty<IHoverTip>());
+            var guard = new EventOption(ev, EvGuard.Wrap(ev, "WAR_COUNCIL.pages.INITIAL.description", "warcouncil", () => Guard(ev)), L("WAR_COUNCIL.options.GUARD.title"), L("WAR_COUNCIL.options.GUARD.description"), "GUARD", System.Array.Empty<IHoverTip>());
+            var leave = new EventOption(ev, EvGuard.Wrap(ev, "WAR_COUNCIL.pages.INITIAL.description", "warcouncil", () => Leave(ev)), L("WAR_COUNCIL.options.LEAVE.title"), L("WAR_COUNCIL.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
             return new List<EventOption> { war, guard, leave };
         }
 
@@ -893,9 +942,9 @@ namespace Zhiji
 
         public static IReadOnlyList<EventOption> BuildOptions(EventModel ev)
         {
-            var sell = new EventOption(ev, () => Sell(ev), L("HARVEST_FEST.options.SELL.title"), L("HARVEST_FEST.options.SELL.description"), "SELL", System.Array.Empty<IHoverTip>());
-            var scythe = new EventOption(ev, () => Scythe(ev), L("HARVEST_FEST.options.SCYTHE.title"), L("HARVEST_FEST.options.SCYTHE.description"), "SCYTHE", System.Array.Empty<IHoverTip>());
-            var leave = new EventOption(ev, () => Leave(ev), L("HARVEST_FEST.options.LEAVE.title"), L("HARVEST_FEST.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
+            var sell = new EventOption(ev, EvGuard.Wrap(ev, "HARVEST_FEST.pages.INITIAL.description", "harvestfestival", () => Sell(ev)), L("HARVEST_FEST.options.SELL.title"), L("HARVEST_FEST.options.SELL.description"), "SELL", System.Array.Empty<IHoverTip>());
+            var scythe = new EventOption(ev, EvGuard.Wrap(ev, "HARVEST_FEST.pages.INITIAL.description", "harvestfestival", () => Scythe(ev)), L("HARVEST_FEST.options.SCYTHE.title"), L("HARVEST_FEST.options.SCYTHE.description"), "SCYTHE", System.Array.Empty<IHoverTip>());
+            var leave = new EventOption(ev, EvGuard.Wrap(ev, "HARVEST_FEST.pages.INITIAL.description", "harvestfestival", () => Leave(ev)), L("HARVEST_FEST.options.LEAVE.title"), L("HARVEST_FEST.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
             return new List<EventOption> { sell, scythe, leave };
         }
 
@@ -971,8 +1020,8 @@ namespace Zhiji
 
         public static IReadOnlyList<EventOption> BuildOptions(EventModel ev)
         {
-            var accept = new EventOption(ev, () => Accept(ev), L("HATCH.options.ACCEPT.title"), L("HATCH.options.ACCEPT.description"), "ACCEPT", System.Array.Empty<IHoverTip>());
-            var refuse = new EventOption(ev, () => Refuse(ev), L("HATCH.options.REFUSE.title"), L("HATCH.options.REFUSE.description"), "REFUSE", System.Array.Empty<IHoverTip>());
+            var accept = new EventOption(ev, EvGuard.Wrap(ev, "HATCH.pages.INITIAL.description", "hatch", () => Accept(ev)), L("HATCH.options.ACCEPT.title"), L("HATCH.options.ACCEPT.description"), "ACCEPT", System.Array.Empty<IHoverTip>());
+            var refuse = new EventOption(ev, EvGuard.Wrap(ev, "HATCH.pages.INITIAL.description", "hatch", () => Refuse(ev)), L("HATCH.options.REFUSE.title"), L("HATCH.options.REFUSE.description"), "REFUSE", System.Array.Empty<IHoverTip>());
             return new List<EventOption> { accept, refuse };
         }
 
@@ -1059,9 +1108,9 @@ namespace Zhiji
 
         public static IReadOnlyList<EventOption> BuildOptions(EventModel ev)
         {
-            var accept = new EventOption(ev, () => Accept(ev), L("RED_HEART.options.ACCEPT.title"), L("RED_HEART.options.ACCEPT.description"), "ACCEPT", System.Array.Empty<IHoverTip>());
-            var open = new EventOption(ev, () => OpenRib(ev), L("RED_HEART.options.OPEN.title"), L("RED_HEART.options.OPEN.description"), "OPEN", System.Array.Empty<IHoverTip>());
-            var leave = new EventOption(ev, () => Leave(ev), L("RED_HEART.options.LEAVE.title"), L("RED_HEART.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
+            var accept = new EventOption(ev, EvGuard.Wrap(ev, "RED_HEART.pages.ACCEPT.description", "red heart accept", () => Accept(ev)), L("RED_HEART.options.ACCEPT.title"), L("RED_HEART.options.ACCEPT.description"), "ACCEPT", System.Array.Empty<IHoverTip>());
+            var open = new EventOption(ev, EvGuard.Wrap(ev, "RED_HEART.pages.OPEN.description", "red heart open", () => OpenRib(ev)), L("RED_HEART.options.OPEN.title"), L("RED_HEART.options.OPEN.description"), "OPEN", System.Array.Empty<IHoverTip>());
+            var leave = new EventOption(ev, EvGuard.Wrap(ev, "RED_HEART.pages.LEAVE.description", "red heart leave", () => Leave(ev)), L("RED_HEART.options.LEAVE.title"), L("RED_HEART.options.LEAVE.description"), "LEAVE", System.Array.Empty<IHoverTip>());
             return new List<EventOption> { accept, open, leave };
         }
 

@@ -153,7 +153,17 @@ namespace Zhiji
                     if (dp != null) dis = System.Convert.ToString(dp.GetValue(eobj));
                 }
                 ZLog.W("SCREEN select " + (characterModel != null ? characterModel.Id.Entry : "?") + " name=" + nl + " embarkDisabled=" + dis);
-                if (characterModel is Zhiji) ApplySelectBg(__instance);
+                if (characterModel is Zhiji)
+                {
+                    // 3.3.14：背景图解码+建纹理是同步开销，放在 SelectCharacter 里会让"出战按钮"
+                    // 晚一步才可用（AutoSlay/连点会点空）。改为延后一帧执行。
+                    try
+                    {
+                        var scr = __instance;
+                        Godot.Callable.From(() => { try { ApplySelectBg(scr); } catch { } }).CallDeferred();
+                    }
+                    catch { ApplySelectBg(__instance); }
+                }
             }
             catch (Exception e) { ZLog.W("screen select log fail " + e.Message); }
         }
@@ -167,22 +177,28 @@ namespace Zhiji
                 var bf = t.GetField("_bgContainer", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
                 var cont = bf != null ? bf.GetValue(screen) as Godot.Control : null;
                 if (cont == null) { ZLog.W("no bg container"); return; }
+                Godot.TextureRect tr = null;
                 foreach (var c in cont.GetChildren())
                 {
+                    if (c is Godot.TextureRect t0 && t0.Name.ToString() == "ZhijiSelectBg") { tr = t0; continue; }
                     var ci = c as Godot.CanvasItem;
                     if (ci != null) ci.Visible = false;
                 }
                 var tex = Art.Get("zhiji_bg");
                 if (tex == null) { ZLog.W("no bg art"); return; }
-                var tr = new Godot.TextureRect();
-                tr.Name = "ZhijiSelectBg";
+                if (tr == null || !Godot.GodotObject.IsInstanceValid(tr))
+                {
+                    tr = new Godot.TextureRect();
+                    tr.Name = "ZhijiSelectBg";
+                    tr.ExpandMode = Godot.TextureRect.ExpandModeEnum.IgnoreSize;
+                    tr.StretchMode = Godot.TextureRect.StretchModeEnum.KeepAspectCovered;
+                    tr.SetAnchorsPreset(Godot.Control.LayoutPreset.FullRect);
+                    tr.MouseFilter = Godot.Control.MouseFilterEnum.Ignore;
+                    cont.AddChild(tr);
+                    ZLog.W("select bg created");
+                }
                 tr.Texture = tex;
-                tr.ExpandMode = Godot.TextureRect.ExpandModeEnum.IgnoreSize;
-                tr.StretchMode = Godot.TextureRect.StretchModeEnum.KeepAspectCovered;
-                tr.SetAnchorsPreset(Godot.Control.LayoutPreset.FullRect);
-                tr.MouseFilter = Godot.Control.MouseFilterEnum.Ignore;
-                cont.AddChild(tr);
-                ZLog.W("select bg applied");
+                tr.Visible = true;
             }
             catch (Exception e) { ZLog.W("select bg fail " + e.Message); }
         }

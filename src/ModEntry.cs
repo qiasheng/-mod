@@ -11,15 +11,70 @@ namespace Zhiji
 {
     public static class ZLog
     {
-        const string Dir = "/storage/emulated/0/Android/data/com.megacrit.sts2re/files";
+        const string AndroidDir = "/storage/emulated/0/Android/data/com.megacrit.sts2re/files";
         static readonly string[] Quiet = { "sync pulse", "famine preview", "autotest probe", "engine log copied", "engine log not found", "relic packed path", "patched-pre", "patched-post", "debug: cmd" };
+
+        // 日志目录按平台解析（254.3 的 Windows 跳过保留；3.3.2 起 Linux/PC 也落盘，方便无头测试）
+        static string _logDir;
+        static bool _logDirDone;
+        static string LogDir()
+        {
+            if (_logDirDone) return _logDir;
+            _logDirDone = true;
+            try
+            {
+                string os = Godot.OS.GetName();
+                if (os == "Android")
+                {
+                    _logDir = AndroidDir;
+                }
+                else if (os == "Windows")
+                {
+                    _logDir = null;   // 保持 254.3：Windows 不再逐行写文件
+                }
+                else
+                {
+                    // Linux/其他桌面：user:// 即 ~/.local/share/<游戏名>
+                    var ud = Godot.OS.GetUserDataDir();
+                    if (!string.IsNullOrEmpty(ud))
+                    {
+                        try { System.IO.Directory.CreateDirectory(ud); } catch { }
+                        _logDir = ud;
+                    }
+                }
+            }
+            catch { _logDir = null; }
+            return _logDir;
+        }
+
+        public static string LogDirPublic() { return LogDir(); }
+
         public static void W(string s)
         {
             bool quiet = false;
             try { foreach (var q in Quiet) if (s.StartsWith(q)) { quiet = true; break; } } catch { }
             if (!quiet) { try { Godot.GD.Print("[zhiji] " + s); } catch { } }
             if (quiet) return;
-            try { if (Godot.OS.GetName() != "Windows") System.IO.File.AppendAllText(System.IO.Path.Combine(Dir, "zhiji_log.txt"), "[" + DateTime.Now.ToString("HH:mm:ss.fff") + "] " + s + "\n"); } catch { }
+            try
+            {
+                var dir = LogDir();
+                if (dir == null) return;
+                var path = System.IO.Path.Combine(dir, "zhiji_log.txt");
+                // 4MB 上限：长局/长测时避免日志无限增长（轮转成 .old，只留一份）
+                try
+                {
+                    var fi = new System.IO.FileInfo(path);
+                    if (fi.Exists && fi.Length > 4 * 1024 * 1024)
+                    {
+                        var old = System.IO.Path.Combine(dir, "zhiji_log.old.txt");
+                        try { System.IO.File.Delete(old); } catch { }
+                        System.IO.File.Move(path, old);
+                    }
+                }
+                catch { }
+                System.IO.File.AppendAllText(path, "[" + DateTime.Now.ToString("HH:mm:ss.fff") + "] " + s + "\n");
+            }
+            catch { }
         }
     }
 
@@ -57,6 +112,7 @@ namespace Zhiji
         public static void OnCombatSetUp()
         {
             ZhijiStore.ResetAll();
+            try { Visuals.HideDeathSprite("combat setup"); } catch { }
             try
             {
                 var rm = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
@@ -99,16 +155,7 @@ namespace Zhiji
                 {
                     var stDead = ZhijiStore.Of(player);
                     stDead.AutoPlayPending = false;
-                    if (!stDead.DeathHandled)
-                    {
-                        stDead.DeathHandled = true;
-                        var cmD = MegaCrit.Sts2.Core.Combat.CombatManager.Instance;
-                        if (cmD != null)
-                        {
-                            ZLog.W("dead turn start -> HandlePlayerDeath");
-                            _ = cmD.HandlePlayerDeath(cmD.CurrentCombatId, player);
-                        }
-                    }
+                    ZhijiPatcher.EnsureDeathSettled(player, "turn-start");
                     ZLog.W("turn start skipped (player dead)");
                     return;
                 }
@@ -536,7 +583,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.1");
+                ZLog.W("entry build 3.3.14");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -569,6 +616,12 @@ namespace Zhiji
         static readonly System.Random _autoRng = new System.Random();
         static bool _done;
 
+        static int CostOf(MegaCrit.Sts2.Core.Models.CardModel c)
+        {
+            try { return c != null && c.EnergyCost != null ? (int)c.EnergyCost.GetWithModifiers(MegaCrit.Sts2.Core.Entities.Cards.CostModifiers.None) : 99; }
+            catch { return 99; }
+        }
+
         public static void TryConsumeAutoPlay()
         {
             try
@@ -599,19 +652,31 @@ namespace Zhiji
                 catch { }
                 bool ok = false;
                 MegaCrit.Sts2.Core.Models.CardModel pick = null;
-                for (int attempt = 0; attempt < System.Math.Min(3, cands.Count); attempt++)
+                int tried = 0, failed = 0;
+                var fails = new System.Text.StringBuilder();
+                // 3.3.5：旧实现只随机试 3 张，手牌里有「需要选择/无目标」的牌时容易 ok=False；
+                // 改为把候选全部试完（先打费的），仍不行再用空放（无目标）兜底。
+                try { cands.Sort((a, b) => CostOf(a).CompareTo(CostOf(b))); } catch { }
+                foreach (var pass in new MegaCrit.Sts2.Core.Entities.Creatures.Creature[] { tgt, null })
                 {
-                    int idx = _autoRng.Next(cands.Count);
-                    var cand = cands[idx];
-                    cands.RemoveAt(idx);
-                    try
+                    foreach (var cand in cands)
                     {
-                        if (cand.TryManualPlay(tgt)) { ok = true; pick = cand; break; }
+                        if (cand == null) continue;
+                        tried++;
+                        try
+                        {
+                            if (cand.TryManualPlay(pass)) { ok = true; pick = cand; break; }
+                            failed++;
+                            fails.Append(cand.Id.Entry + " ");
+                        }
+                        catch (Exception e2) { failed++; fails.Append(cand.Id.Entry + "!"); ZLog.W("auto play fail " + cand.Id.Entry + " " + e2.Message); }
                     }
-                    catch (Exception e2) { ZLog.W("auto play fail " + cand.Id.Entry + " " + e2.Message); }
+                    if (ok) break;
+                    if (tgt == null) break;      // 本来就没有目标，不必再跑一遍
                 }
                 st.AutoPlayPending = false;
-                ZLog.W("unbound auto play " + (pick != null ? pick.Id.Entry : "none") + " ok=" + ok);
+                ZLog.W("unbound auto play " + (pick != null ? pick.Id.Entry : "none") + " ok=" + ok
+                    + " tried=" + tried + " failed=" + failed + " blocked=[" + fails.ToString().Trim() + "]");
             }
             catch { }
         }
@@ -732,7 +797,6 @@ namespace Zhiji
                 TryPatchPrefix(harmony, DinerEvent.Hijacked, "GenerateInitialOptions", "DinerOptionsPrefix");
                 // 测试用"第一层必出饭馆"已下线：饭馆回归随机事件（WoodCarvings 位置）
                 // TryPatchPostfixRef(harmony, "MegaCrit.Sts2.Core.Models.ActModel", "PullNextEvent", "ForceDinerPostfix");
-                TryPatchPrefix(harmony, "MegaCrit.Sts2.Core.Models.EventModel", "GenerateInitialOptions", "RedHeartOptionsPrefix");
                 TryPatchPrefix(harmony, "MegaCrit.Sts2.Core.Models.EventModel", "get_Title", "DinerTitlePrefix");
                 TryPatchPrefix(harmony, "MegaCrit.Sts2.Core.Models.EventModel", "get_InitialDescription", "DinerDescPrefix");
             try { TryPatchPostfixRef(harmony, "MegaCrit.Sts2.Core.Models.EnchantmentModel", "get_IconPath", "EnchantIconPostfix"); } catch { }
@@ -743,6 +807,20 @@ namespace Zhiji
             try { TryPatchPostfixRef(harmony, "MegaCrit.Sts2.Core.Models.PowerModel", "get_IconPath", "PowerIconPostfix"); } catch { }
             try { TryPatchPostfixRef(harmony, "MegaCrit.Sts2.Core.Nodes.Combat.NPower", "_Ready", "PowerNodeIconPostfix"); } catch { }
             try { TryPatchPostfixRef(harmony, "MegaCrit.Sts2.Core.Nodes.NRun", "_Process", "NRunProcessPostfix"); } catch (Exception eRH1) { ZLog.W("nrun patch fail " + eRH1.Message); }
+            // 3.3.4：战败/结算界面出现时，强制收起 mod 自绘层（防止立绘盖住分数面板）
+            try
+            {
+                var ovT = GameAsm() != null ? GameAsm().GetType("MegaCrit.Sts2.Core.Nodes.Screens.Overlays.NOverlayStack", false) : null;
+                var ovM = ovT != null ? ovT.GetMethod("Push", BindingFlags.Public | BindingFlags.Instance) : null;
+                if (ovM != null)
+                {
+                    var hPost = typeof(ZhijiPatcher).GetMethod("OverlayPushPostfix", BindingFlags.Public | BindingFlags.Static);
+                    harmony.Patch(ovM, postfix: new HarmonyMethod(hPost));
+                    ZLog.W("patched overlay stack push");
+                }
+                else ZLog.W("overlay stack push not found");
+            }
+            catch (Exception eOV) { ZLog.W("overlay push patch fail " + eOV.Message); }
             try
             {
                 var capT = GameAsm() != null ? GameAsm().GetType("MegaCrit.Sts2.Core.Models.Relics.LargeCapsule", false) : null;
@@ -850,6 +928,8 @@ namespace Zhiji
             catch (Exception eEI) { ZLog.W("energy icon patch fail " + eEI.Message); }
             TryPatchPrefixEx(harmony, "MegaCrit.Sts2.Core.Entities.Creatures.Creature", "LoseHpInternal", "LoseHpPrefix");
             TryPatchPostfixTwo(harmony, "MegaCrit.Sts2.Core.Entities.Creatures.Creature", "LoseHpInternal", "LoseHpPostfix");
+            // 3.3.3：黄金寿衣 —— 流血中的敌人无法回复生命
+            TryPatchPrefix(harmony, "MegaCrit.Sts2.Core.Entities.Creatures.Creature", "HealInternal", "HealInternalPrefix");
             TryPatchPrefix(harmony, "MegaCrit.Sts2.Core.Commands.CardCmd", "Exhaust", "ExhaustPrefix");
             TryPatchPrefix(harmony, "MegaCrit.Sts2.Core.Commands.CardPileCmd", "DrawInternal", "DrawInternalPrefix");
             TryPatchPrefix(harmony, "MegaCrit.Sts2.Core.Saves.Managers.ProgressSaveManager", "UpdateAfterCombatWon", "ProgressCombatWonPrefix");
@@ -1344,10 +1424,25 @@ namespace Zhiji
                             foreach (var c in n.GetChildren()) { if (LabelHas(c, k)) return true; }
                             return false;
                         }
+                        bool AncestorsVisible(Godot.Node n)
+                        {
+                            try
+                            {
+                                var p = n.GetParent();
+                                int guard = 0;
+                                while (p != null && guard++ < 32)
+                                {
+                                    if (p is Godot.CanvasItem ci2 && !ci2.Visible) return false;
+                                    p = p.GetParent();
+                                }
+                            }
+                            catch { }
+                            return true;
+                        }
                         void Walk(Godot.Node n)
                         {
                             if (n == null) return;
-                            if (n is Godot.BaseButton b && (b.Visible) && !b.Disabled)
+                            if (n is Godot.BaseButton b && (b.Visible) && !b.Disabled && AncestorsVisible(b))
                             {
                                 string btext = (b as Godot.Button)?.Text;
                                 bool textHit = !string.IsNullOrEmpty(btext) && btext.Contains(key);
@@ -1359,7 +1454,7 @@ namespace Zhiji
                                     ZLog.W("debug: press hit " + b.GetType().Name + " label=" + labelHit);
                                 }
                             }
-                            else if (n is Godot.Control ctl && ctl.Visible && LabelHas(n, key))
+                            else if (n is Godot.Control ctl && ctl.Visible && AncestorsVisible(ctl) && LabelHas(n, key))
                             {
                                 // 自定义控件（如事件选项 NEventOptionButton）：反射调用 OnRelease/Press
                                 foreach (var mn in new[] { "OnRelease", "Press", "OnPress", "Clicked" })
@@ -2019,6 +2114,421 @@ namespace Zhiji
                         { plHu.Creature.LoseHpInternal(nHurt, MegaCrit.Sts2.Core.ValueProps.ValueProp.Unpowered); ZLog.W("debug hurt " + nHurt); }
                     }
                     catch (Exception eHu) { ZLog.W("debug hurt fail " + eHu.Message); }
+                }
+                // 临时调试：逐个试引擎的「死亡/战败」入口（定案后删掉）
+                if (cmd && cmdText == "t:asstop")
+                {
+                    try
+                    {
+                        if (_autoslayer == null) { ZLog.W("t:asstop: no inst"); }
+                        else
+                        {
+                            var mStop = _autoslayer.GetType().GetMethod("Stop", BindingFlags.Public | BindingFlags.Instance);
+                            mStop?.Invoke(_autoslayer, null);
+                            ZLog.W("t:asstop ok");
+                        }
+                    }
+                    catch (Exception eSt) { ZLog.W("t:asstop fail " + eSt.GetBaseException().Message); }
+                }
+                if (cmd && cmdText == "t:autoslay")
+                {
+                    // 引擎自带 AutoSlayer：程序化开局并自动打牌（无需鼠标输入，适合 GPU 性能测试）
+                    try
+                    {
+                        var asT = GameAsm() != null ? GameAsm().GetType("MegaCrit.Sts2.Core.AutoSlay.AutoSlayer", false) : null;
+                        if (asT == null) { ZLog.W("t:autoslay: type not found"); }
+                        else
+                        {
+                            var inst = Activator.CreateInstance(asT);
+                            _autoslayer = inst;
+                            var startM = asT.GetMethod("Start", BindingFlags.Public | BindingFlags.Instance);
+                            var logPath = System.IO.Path.Combine(ZLog.LogDirPublic() ?? "/tmp", "autoslay.log");
+                            startM.Invoke(inst, new object[] { "zhiji_perf", logPath });
+                            ZLog.W("t:autoslay started log=" + logPath);
+                        }
+                    }
+                    catch (Exception eAS) { ZLog.W("t:autoslay fail " + eAS.GetBaseException().Message); }
+                }
+                if (cmd && cmdText.StartsWith("t:"))
+                {
+                    try
+                    {
+                        string which = cmdText.Substring(2);
+                        var plT = DebugPlayer();
+                        var cmT = MegaCrit.Sts2.Core.Combat.CombatManager.Instance;
+                        ZLog.W("t:" + which + " start hp=" + (plT?.Creature?.CurrentHp.ToString() ?? "null")
+                            + " dead=" + (plT?.Creature?.IsDead.ToString() ?? "-")
+                            + " inProgress=" + (cmT?.IsInProgress.ToString() ?? "-")
+                            + " aboutToLose=" + (cmT?.IsAboutToLose.ToString() ?? "-")
+                            + " ending=" + (cmT?.IsEnding.ToString() ?? "-"));
+                        if (plT == null) { ZLog.W("t: no player"); }
+                        else if (which == "kill")
+                        {
+                            _ = MegaCrit.Sts2.Core.Commands.CreatureCmd.Kill(plT.Creature, true)
+                                .ContinueWith(t => ZLog.W("t:kill done=" + t.IsCompleted + " err=" + (t.Exception?.GetBaseException().Message ?? "-")));
+                            ZLog.W("t:kill fired");
+                        }
+                        else if (which == "invoke")
+                        {
+                            plT.Creature.InvokeDiedEvent();
+                            ZLog.W("t:invoke done");
+                        }
+                        else if (which == "endrun")
+                        {
+                            var rmT = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                            var rT = rmT.OnEnded(false);
+                            ZLog.W("t:endrun returned " + (rT?.GetType().Name ?? "null"));
+                        }
+                        else if (which == "pending" && cmT != null)
+                        {
+                            var tsT0 = LiveTurnState(cmT);
+                            bool okT = MarkPendingLoss(cmT, tsT0);
+                            ZLog.W("t:pending ok=" + okT + " ts=" + (tsT0 == null ? "null" : "ok") + " aboutToLose=" + (cmT.IsAboutToLose.ToString()));
+                        }
+                        else if (which == "process" && cmT != null)
+                        {
+                            var tsT = LiveTurnState(cmT);
+                            bool okT = ProcessPendingLoss(cmT, tsT);
+                            ZLog.W("t:process ok=" + okT + " aboutToLose=" + cmT.IsAboutToLose + " ending=" + cmT.IsEnding);
+                        }
+                        else if (which == "over")
+                        {
+                            bool okT = ShowDefeatScreen();
+                            ZLog.W("t:over ok=" + okT);
+                        }
+                        else if (which == "heal")
+                        {
+                            var csH = cmT != null ? cmT.DebugOnlyGetState() : null;
+                            int nH = 0;
+                            if (csH != null && csH.Enemies != null)
+                                foreach (var eH in csH.Enemies)
+                                {
+                                    if (eH == null || eH.IsDead) continue;
+                                    int before = eH.CurrentHp;
+                                    // 先扣 10 再回 10：能直观看出治疗是否被拦截
+                                    eH.LoseHpInternal(10, MegaCrit.Sts2.Core.ValueProps.ValueProp.Unpowered);
+                                    int mid = eH.CurrentHp;
+                                    eH.HealInternal(10);
+                                    ZLog.W("t:heal enemy hp " + before + " -10 -> " + mid + " +10 -> " + eH.CurrentHp
+                                        + " max=" + eH.MaxHp + " bleed=" + eH.GetPowerAmount<BleedPower>());
+                                    nH++;
+                                    if (nH >= 1) break;
+                                }
+                            ZLog.W("t:heal done n=" + nH);
+                        }
+                        else if (which == "anim" || which == "animsync" || which == "animback")
+                        {
+                            try
+                            {
+                                Visuals.NoPrefetch = (which == "animsync");
+                                Visuals.TransformPlayed = 0;      // 允许重复播放全屏演出
+                                Visuals.PlayTransform(which == "animback" ? "transform_back" : "transform");
+                                ZLog.W("t:" + which + " started noPrefetch=" + Visuals.NoPrefetch);
+                            }
+                            catch (Exception eA2) { ZLog.W("t:anim fail " + eA2.GetBaseException().Message); }
+                        }
+                        else if (which == "upaudit")
+                        {
+                            // 逐张升级所有吱咿卡，找出「升级后数值/费用都没变」的静默无效升级
+                            try
+                            {
+                                var rmU = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                                var rsU = rmU != null ? rmU.DebugOnlyGetState() : null;
+                                var plU = rsU != null && rsU.Players != null && rsU.Players.Count > 0 ? rsU.Players[0] : null;
+                                if (plU == null) { ZLog.W("t:upaudit no player"); }
+                                else
+                                {
+                                    int total = 0, noop = 0, failed = 0;
+                                    var noopNames = new System.Text.StringBuilder();
+                                    foreach (var canon in MegaCrit.Sts2.Core.Models.ModelDb.AllCards)
+                                    {
+                                        if (!(canon is ZhijiCard)) continue;
+                                        if (canon.MaxUpgradeLevel <= 0) continue;
+                                        total++;
+                                        try
+                                        {
+                                            var inst = rsU.CreateCard(canon, plU);
+                                            if (inst == null) { failed++; continue; }
+                                            string sig0 = CardSig(inst);
+                                            MegaCrit.Sts2.Core.Commands.CardCmd.Upgrade(inst, MegaCrit.Sts2.Core.Nodes.CommonUi.CardPreviewStyle.None);
+                                            string sig1 = CardSig(inst);
+                                            if (sig0 == sig1) { noop++; noopNames.Append(canon.Id.Entry + " "); }
+                                        }
+                                        catch (Exception eUA) { failed++; if (failed <= 3) ZLog.W("upaudit fail " + canon.Id.Entry + " " + eUA.GetBaseException().Message); }
+                                    }
+                                    ZLog.W("t:upaudit total=" + total + " noop=" + noop + " failed=" + failed + " noopCards=[" + noopNames.ToString().Trim() + "]");
+                                }
+                            }
+                            catch (Exception eU2) { ZLog.W("t:upaudit fail " + eU2.GetBaseException().Message); }
+                        }
+                        else if (which == "mem")
+                        {
+                            try
+                            {
+                                double fps = Godot.Engine.GetFramesPerSecond();
+                                double memStatic = Godot.Performance.GetMonitor(Godot.Performance.Monitor.MemoryStatic);
+                                double objs = Godot.Performance.GetMonitor(Godot.Performance.Monitor.ObjectCount);
+                                double nodes = Godot.Performance.GetMonitor(Godot.Performance.Monitor.ObjectNodeCount);
+                                double orphans = Godot.Performance.GetMonitor(Godot.Performance.Monitor.ObjectOrphanNodeCount);
+                                double res = Godot.Performance.GetMonitor(Godot.Performance.Monitor.ObjectResourceCount);
+                                double draws = Godot.Performance.GetMonitor(Godot.Performance.Monitor.RenderTotalDrawCallsInFrame);
+                                long managed = System.GC.GetTotalMemory(false);
+                                ZLog.W("t:mem fps=" + fps.ToString("0.0")
+                                    + " memStaticMB=" + ((long)memStatic / 1048576)
+                                    + " objs=" + (long)objs + " nodes=" + (long)nodes + " orphans=" + (long)orphans
+                                    + " res=" + (long)res + " draws=" + (long)draws
+                                    + " managedMB=" + (managed / 1048576)
+                                    + " enemyHpCache=" + EnemyBaseHpCount());
+                            }
+                            catch (Exception eM2) { ZLog.W("t:mem fail " + eM2.GetBaseException().Message); }
+                        }
+                        else if (which.StartsWith("fps"))
+                        {
+                            try
+                            {
+                                double fps = Godot.Engine.GetFramesPerSecond();
+                                long staticMem = (long)Godot.OS.GetStaticMemoryUsage();
+                                string driver = "-";
+                                try { driver = Godot.RenderingServer.GetVideoAdapterName(); } catch { }
+                                ZLog.W("t:fps fps=" + fps.ToString("0.0") + " staticMemMB=" + (staticMem / 1048576)
+                                    + " adapter=" + driver);
+                            }
+                            catch (Exception eF) { ZLog.W("t:fps fail " + eF.GetBaseException().Message); }
+                        }
+                        else if (which == "report")
+                        {
+                            // 生成本地反馈包：状态 + 遗物 + 牌组 + 敌人 + 最近日志
+                            try
+                            {
+                                var sbR = new System.Text.StringBuilder();
+                                var rmR = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                                var rsR = rmR != null ? rmR.DebugOnlyGetState() : null;
+                                var plR = rsR != null && rsR.Players != null && rsR.Players.Count > 0 ? rsR.Players[0] : null;
+                                sbR.AppendLine("=== zhiji report ===");
+                                sbR.AppendLine("time: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                                sbR.AppendLine("build: " + typeof(ZhijiPatcher).Assembly.GetName().Version);
+                                if (plR != null)
+                                {
+                                    var stR = ZhijiStore.Of(plR);
+                                    sbR.AppendLine("form=" + stR.Form + " hunger=" + stR.Hunger + " pulse=" + stR.Pulse
+                                        + " feast=" + stR.Feast + " stand=" + stR.Stand + " reap=" + stR.Reap
+                                        + " shroud=" + stR.GoldShroud);
+                                    try
+                                    {
+                                        sbR.Append("relics:");
+                                        if (plR.Relics != null) foreach (var rr in plR.Relics) sbR.Append(" " + rr.Id.Entry);
+                                        sbR.AppendLine();
+                                    }
+                                    catch { }
+                                    try
+                                    {
+                                        sbR.Append("deck:");
+                                        var deck = plR.Deck;
+                                        if (deck != null && deck.Cards != null) foreach (var cc in deck.Cards) sbR.Append(" " + cc.Id.Entry + (cc.IsUpgraded ? "+" : ""));
+                                        sbR.AppendLine();
+                                    }
+                                    catch { }
+                                    try { sbR.AppendLine("hp=" + plR.Creature.CurrentHp + "/" + plR.Creature.MaxHp + " gold=" + plR.Gold); } catch { }
+                                }
+                                try
+                                {
+                                    var cmR = MegaCrit.Sts2.Core.Combat.CombatManager.Instance;
+                                    var csR = cmR != null ? cmR.DebugOnlyGetState() : null;
+                                    if (csR != null && csR.Enemies != null)
+                                    {
+                                        sbR.Append("enemies:");
+                                        foreach (var eR in csR.Enemies) if (eR != null) sbR.Append(" " + eR.Name + "(" + eR.CurrentHp + "/" + eR.MaxHp + ")");
+                                        sbR.AppendLine();
+                                    }
+                                }
+                                catch { }
+                                sbR.AppendLine("--- last log ---");
+                                try
+                                {
+                                    var dirR = ZLog.LogDirPublic();
+                                    if (dirR != null)
+                                    {
+                                        var fR = System.IO.Path.Combine(dirR, "zhiji_log.txt");
+                                        if (System.IO.File.Exists(fR))
+                                        {
+                                            var linesR = System.IO.File.ReadAllLines(fR);
+                                            int fromR = System.Math.Max(0, linesR.Length - 200);
+                                            for (int i = fromR; i < linesR.Length; i++) sbR.AppendLine(linesR[i]);
+                                        }
+                                    }
+                                }
+                                catch { }
+                                string outDir = ZLog.LogDirPublic() ?? System.IO.Path.GetTempPath();
+                                string outPath = System.IO.Path.Combine(outDir, "zhiji_report.txt");
+                                System.IO.File.WriteAllText(outPath, sbR.ToString());
+                                ZLog.W("report written -> " + outPath);
+                                Visuals.Popup("反馈包已生成：zhiji_report.txt", new Godot.Color(0.4f, 1f, 0.5f));
+                            }
+                            catch (Exception eRep) { ZLog.W("t:report fail " + eRep.GetBaseException().Message); }
+                        }
+                        else if (which == "perf")
+                        {
+                            // 测量 0.7s 心跳里各子函数的开销（每项 20 次取平均/最大）
+                            try
+                            {
+                                System.Func<string, Action, string> timeIt = (name, act) =>
+                                {
+                                    long total = 0, max = 0; int n = 20;
+                                    for (int i = 0; i < n; i++)
+                                    {
+                                        var sw2 = System.Diagnostics.Stopwatch.StartNew();
+                                        try { act(); } catch { }
+                                        long ms = sw2.ElapsedMilliseconds;
+                                        total += ms;
+                                        if (ms > max) max = ms;
+                                    }
+                                    return name + "=" + (total / (double)n).ToString("0.00") + "/" + max;
+                                };
+                                var parts = new System.Collections.Generic.List<string>();
+                                parts.Add(timeIt("occlusion", () => Visuals.SyncUiOcclusion()));
+                                {   // 原始遍历开销（去掉节流）
+                                    long saved = Visuals.OcclusionIntervalMs;
+                                    Visuals.OcclusionIntervalMs = 0;
+                                    parts.Add(timeIt("occlusionRaw", () => Visuals.SyncUiOcclusion()));
+                                    Visuals.OcclusionIntervalMs = saved;
+                                }
+                                parts.Add(timeIt("handRefresh", () => Visuals.RefreshHandValues()));
+                                parts.Add(timeIt("eventArt", () => Visuals.EventArtTickPublic()));
+                                parts.Add(timeIt("ostySkin", () => Visuals.UpdateOstySkin()));
+                                var plP = DebugPlayer();
+                                parts.Add(timeIt("sync", () => { if (plP != null) ZhijiPowers.Sync(plP); }));
+                                parts.Add(timeIt("autoPlay", () => ZhijiPatcher.TryConsumeAutoPlay()));
+                                ZLog.W("t:perf avg/max(20x) " + string.Join(" ", parts));
+                            }
+                            catch (Exception eP) { ZLog.W("t:perf fail " + eP.GetBaseException().Message); }
+                        }
+                        else if (which.StartsWith("bench"))
+                        {
+                            // t:bench:N —— 纯解码/建纹理成本（不依赖渲染帧率）
+                            int nb = 30;
+                            int.TryParse(which.Substring(5).TrimStart(':'), out nb);
+                            if (nb <= 0) nb = 30;
+                            try
+                            {
+                                var sw = System.Diagnostics.Stopwatch.StartNew();
+                                long maxD = 0; int nD = 0;
+                                for (int i = 0; i < nb; i++)
+                                {
+                                    var t1 = System.Diagnostics.Stopwatch.StartNew();
+                                    var img = Art.GetImage("transform", i);
+                                    if (img != null)
+                                    {
+                                        var tex = Godot.ImageTexture.CreateFromImage(img);
+                                        img.Dispose();
+                                        nD++;
+                                    }
+                                    long d = t1.ElapsedMilliseconds;
+                                    if (d > maxD) maxD = d;
+                                }
+                                ZLog.W("t:bench decode+tex n=" + nD + " totalMs=" + sw.ElapsedMilliseconds
+                                    + " avgMs=" + (nD > 0 ? (sw.ElapsedMilliseconds / (double)nD).ToString("0.0") : "-") + " maxMs=" + maxD);
+                            }
+                            catch (Exception eB) { ZLog.W("t:bench fail " + eB.GetBaseException().Message); }
+                        }
+                        else if (which == "auto")
+                        {
+                            try
+                            {
+                                var plA = DebugPlayer();
+                                if (plA == null) ZLog.W("t:auto no player");
+                                else
+                                {
+                                    ZhijiStore.Of(plA).AutoPlayPending = true;
+                                    ZhijiPatcher.TryConsumeAutoPlay();
+                                    ZLog.W("t:auto done pending=" + ZhijiStore.Of(plA).AutoPlayPending);
+                                }
+                            }
+                            catch (Exception eA) { ZLog.W("t:auto fail " + eA.GetBaseException().Message); }
+                        }
+                        else if (which.StartsWith("rare"))
+                        {
+                            // t:rare:N —— 统计 N 次三选一里的稀有数量（限 1 是否生效）
+                            int nRoll = 200;
+                            int.TryParse(which.Substring(4).TrimStart(':'), out nRoll);
+                            if (nRoll <= 0) nRoll = 200;
+                            var rmR = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                            var rsR = rmR != null ? rmR.DebugOnlyGetState() : null;
+                            var plR = rsR != null && rsR.Players != null && rsR.Players.Count > 0 ? rsR.Players[0] : null;
+                            if (plR == null) { ZLog.W("t:rare no player"); }
+                            else
+                            {
+                                var poolsR = new System.Collections.Generic.List<MegaCrit.Sts2.Core.Models.CardPoolModel>();
+                                try { poolsR.Add(plR.Character.CardPool); } catch { }
+                                var optsR = MegaCrit.Sts2.Core.Runs.CardCreationOptions.ForNonCombatWithDefaultOdds(poolsR);
+                                int rolls = 0, before2 = 0, after2 = 0, capped = 0, maxRareBefore = 0, maxRareAfter = 0;
+                                for (int i = 0; i < nRoll; i++)
+                                {
+                                    try
+                                    {
+                                        var res = MegaCrit.Sts2.Core.Factories.CardFactory.CreateForReward(plR, 3, optsR);
+                                        var lst = new System.Collections.Generic.List<MegaCrit.Sts2.Core.Entities.Cards.CardCreationResult>(res);
+                                        if (lst.Count < 2) continue;
+                                        int rb = 0;
+                                        foreach (var rr in lst) if (rr.Card != null && rr.Card.Rarity.ToString() == "Rare") rb++;
+                                        rolls++; before2 += rb;
+                                        if (rb > maxRareBefore) maxRareBefore = rb;
+                                        int rep = ApplyRareCap(lst, plR, "t:rare");
+                                        if (rep > 0) capped++;
+                                        int ra = 0;
+                                        foreach (var rr in lst) if (rr.Card != null && rr.Card.Rarity.ToString() == "Rare") ra++;
+                                        after2 += ra;
+                                        if (ra > maxRareAfter) maxRareAfter = ra;
+                                    }
+                                    catch (Exception eR3) { if (i == 0) ZLog.W("t:rare roll fail " + eR3.GetBaseException().Message); }
+                                }
+                                ZLog.W("t:rare rolls=" + rolls + " rareBefore=" + before2 + " rareAfter=" + after2
+                                    + " cappedRolls=" + capped + " maxBefore=" + maxRareBefore + " maxAfter=" + maxRareAfter);
+                            }
+                        }
+                        else if (which == "evdump")
+                        {
+                            try
+                            {
+                                var treeE = Godot.Engine.GetMainLoop() as Godot.SceneTree;
+                                Godot.Node roomE = null;
+                                var evType = GameAsmType("MegaCrit.Sts2.Core.Nodes.Rooms.NEventRoom");
+                                if (evType != null)
+                                {
+                                    var inst = evType.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+                                    roomE = inst as Godot.Node;
+                                }
+                                if (roomE == null && treeE != null) roomE = Visuals.FindRoomNodePublic(treeE.Root, "NEventRoom", 0);
+                                if (roomE == null) { ZLog.W("evdump: no event room"); }
+                                else Visuals.DumpNodeTree(roomE, 0, 6);
+                            }
+                            catch (Exception eD) { ZLog.W("evdump fail " + eD.GetBaseException().Message); }
+                        }
+                        else if (which == "room")
+                        {
+                            var roomT = CurrentCombatRoomDebug();
+                            ZLog.W("t:room " + (roomT?.GetType().FullName ?? "null"));
+                        }
+                        else if (which == "lose" && cmT != null)
+                        {
+                            cmT.LoseCombat();
+                            ZLog.W("t:lose returned");
+                        }
+                        else if (which == "endcombat" && cmT != null)
+                        {
+                            var miT = typeof(MegaCrit.Sts2.Core.Combat.CombatManager).GetMethod("EndCombatInternal",
+                                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic,
+                                null, Type.EmptyTypes, null);
+                            if (miT == null) { ZLog.W("t: endcombat not found"); }
+                            else
+                            {
+                                var taskT = (System.Threading.Tasks.Task)miT.Invoke(cmT, null);
+                                if (taskT != null) _ = taskT.ContinueWith(t => ZLog.W("t:endcombat done=" + t.IsCompleted + " err=" + (t.Exception?.GetBaseException().Message ?? "-")));
+                                ZLog.W("t:endcombat fired");
+                            }
+                        }
+                        else ZLog.W("t: unknown " + which);
+                    }
+                    catch (Exception eT) { ZLog.W("t: fail " + eT.GetBaseException().Message); }
                 }
                 if (cmd && cmdText == "relic:sated_stomach")
                 {
@@ -2767,6 +3277,82 @@ namespace Zhiji
                 {
                     // 危险：直接 EnterNextAct 会在远古事件里触发原生崩溃，已禁用
                     ZLog.W("debug: act command disabled (unsafe)");
+                }
+                if (cmd && cmdText.StartsWith("t:ev:"))
+                {
+                    // 进入指定事件宿主（不设置任何 force 标志），用于模拟"自然进入"的事件
+                    try
+                    {
+                        string evName = cmdText.Substring(5).Trim();
+                        var asmEv = GameAsm();
+                        var evT = FindGameTypeCI(evName);
+                        if (evT == null) { ZLog.W("t:ev type not found: " + evName); }
+                        else
+                        {
+                            var rmEv = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                            var rsEv = rmEv != null ? rmEv.DebugOnlyGetState() : null;
+                            if (rsEv == null) { ZLog.W("t:ev no run state"); }
+                            else
+                            {
+                                var coordEv = rsEv.CurrentMapCoord.HasValue ? rsEv.CurrentMapCoord.Value : new MegaCrit.Sts2.Core.Map.MapCoord(0, 0);
+                                var tEv = rmEv.EnterMapCoordDebug(coordEv, MegaCrit.Sts2.Core.Rooms.RoomType.Event,
+                                    MegaCrit.Sts2.Core.Map.MapPointType.Unassigned, (MegaCrit.Sts2.Core.Models.AbstractModel)null, true);
+                                ZLog.W("t:ev " + evName + " (no model) fired");
+                                _ = tEv;
+                            }
+                        }
+                    }
+                    catch (Exception eEv) { ZLog.W("t:ev fail " + eEv.GetBaseException().Message); }
+                }
+                if (cmd && cmdText.StartsWith("t:evm:"))
+                {
+                    // t:evm:<EventTypeName> —— 带模型进入事件房（真正的"自然宿主"）
+                    try
+                    {
+                        string evName = cmdText.Substring(6).Trim();
+                        var asmEv2 = GameAsm();
+                        var evT2 = FindGameTypeCI(evName);
+                        if (evT2 == null) { ZLog.W("t:evm type not found: " + evName); }
+                        else
+                        {
+                            var rmEv2 = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                            var rsEv2 = rmEv2 != null ? rmEv2.DebugOnlyGetState() : null;
+                            if (rsEv2 == null) { ZLog.W("t:evm no run state"); }
+                            else
+                            {
+                                var modelEv = MegaCrit.Sts2.Core.Models.ModelDb.GetByIdOrNull<MegaCrit.Sts2.Core.Models.EventModel>(
+                                    MegaCrit.Sts2.Core.Models.ModelDb.GetId(evT2));
+                                if (modelEv == null) { ZLog.W("t:evm model null"); }
+                                else
+                                {
+                                    var coordEv2 = rsEv2.CurrentMapCoord.HasValue ? rsEv2.CurrentMapCoord.Value : new MegaCrit.Sts2.Core.Map.MapCoord(0, 0);
+                                    var tEv2 = rmEv2.EnterMapCoordDebug(coordEv2, MegaCrit.Sts2.Core.Rooms.RoomType.Event,
+                                        MegaCrit.Sts2.Core.Map.MapPointType.Unassigned, modelEv, true);
+                                    _ = tEv2.ContinueWith(x => ZLog.W("t:evm " + evName + " ok=" + (x.Status == System.Threading.Tasks.TaskStatus.RanToCompletion)));
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception eEv2) { ZLog.W("t:evm fail " + eEv2.GetBaseException().Message); }
+                }
+                if (cmd && cmdText.StartsWith("t:act:"))
+                {
+                    // 只改 RunState.CurrentActIndex（不触发远古事件/房间重建），用于测试第二层事件
+                    try
+                    {
+                        int wantAct = 0;
+                        int.TryParse(cmdText.Substring(6), out wantAct);
+                        var rmAct = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                        var rsAct = rmAct != null ? rmAct.DebugOnlyGetState() : null;
+                        if (rsAct == null) { ZLog.W("t:act no run state"); }
+                        else
+                        {
+                            int before = rsAct.CurrentActIndex;
+                            rsAct.CurrentActIndex = wantAct;
+                            ZLog.W("t:act " + before + " -> " + rsAct.CurrentActIndex);
+                        }
+                    }
+                    catch (Exception eAct) { ZLog.W("t:act fail " + eAct.GetBaseException().Message); }
                 }
                 if (cmd && cmdText.StartsWith("setph:"))
                 {
@@ -3558,6 +4144,49 @@ namespace Zhiji
             catch (Exception e) { ZLog.W("reward pool guard fail " + e.Message); }
         }
 
+        // 稀有卡限 1（3.3.5）：三选一里最多保留一张稀有，其余降为罕见。
+        // 旧实现嵌在「失控模式」分支里，常态/黄金寿衣路线根本没生效。
+        static int ApplyRareCap(System.Collections.Generic.List<MegaCrit.Sts2.Core.Entities.Cards.CardCreationResult> list,
+            MegaCrit.Sts2.Core.Entities.Players.Player player, string tag)
+        {
+            int replaced = 0;
+            try
+            {
+                if (list == null || list.Count < 2) return 0;
+                int rareCount = 0;
+                foreach (var rr in list) { try { if (rr.Card != null && rr.Card.Rarity.ToString() == "Rare") rareCount++; } catch { } }
+                if (rareCount <= 1) return 0;
+                var rm = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                var rs = rm != null ? rm.DebugOnlyGetState() : null;
+                if (rs == null) return 0;
+                var pool = new System.Collections.Generic.List<MegaCrit.Sts2.Core.Models.CardModel>();
+                foreach (var cc in MegaCrit.Sts2.Core.Models.ModelDb.AllCards)
+                    if (cc is ZhijiCard && cc.Rarity.ToString() == "Uncommon") pool.Add(cc);
+                if (pool.Count == 0)
+                    foreach (var cc in MegaCrit.Sts2.Core.Models.ModelDb.AllCards)
+                        if (cc != null && cc.Rarity.ToString() == "Uncommon") pool.Add(cc);
+                if (pool.Count == 0) { ZLog.W(tag + " rare cap: no uncommon pool"); return 0; }
+                bool kept = false;
+                for (int i = 0; i < list.Count && rareCount > 1; i++)
+                {
+                    try
+                    {
+                        if (list[i].Card == null || list[i].Card.Rarity.ToString() != "Rare") continue;
+                        if (!kept) { kept = true; continue; }
+                        var pick = pool[_rewardRng.Next(pool.Count)];
+                        var inst = rs.CreateCard(pick, player);
+                        if (inst == null) continue;
+                        list[i].ModifyCard(inst);
+                        rareCount--; replaced++;
+                        ZLog.W(tag + " rare cap -> " + inst.Id.Entry);
+                    }
+                    catch { }
+                }
+            }
+            catch (Exception e) { ZLog.W(tag + " rare cap fail " + e.Message); }
+            return replaced;
+        }
+
         public static void RewardBiasPostfix(MegaCrit.Sts2.Core.Entities.Players.Player player,
             ref System.Collections.Generic.IEnumerable<MegaCrit.Sts2.Core.Entities.Cards.CardCreationResult> __result)
         {
@@ -3639,43 +4268,13 @@ namespace Zhiji
                                     if (instU != null) { list[idx].ModifyCard(instU); ZLog.W("unbound reward bias: 1 slot -> " + instU.Id.Entry); }
                                 }
                                 ZLog.W("unbound reward mixed: " + list.Count + " cards");
-                                // 金卡（稀有）爆率过高：三选一里最多保留 1 张稀有，其余降为罕见
-                                try
-                                {
-                                    int rareCount = 0;
-                                    foreach (var rr in list) { try { if (rr.Card != null && rr.Card.Rarity.ToString() == "Rare") rareCount++; } catch { } }
-                                    if (rareCount > 1)
-                                    {
-                                        var unPool2 = new System.Collections.Generic.List<MegaCrit.Sts2.Core.Models.CardModel>();
-                                        foreach (var cc in MegaCrit.Sts2.Core.Models.ModelDb.AllCards)
-                                        {
-                                            if (cc == null) continue;
-                                            if (!(cc is ZhijiCard)) continue;
-                                            if (cc.Rarity.ToString() != "Uncommon") continue;
-                                            unPool2.Add(cc);
-                                        }
-                                        int replaced = 0;
-                                        for (int i = 0; i < list.Count && rareCount > 1; i++)
-                                        {
-                                            try
-                                            {
-                                                if (list[i].Card == null || list[i].Card.Rarity.ToString() != "Rare") continue;
-                                                if (replaced == 0) { replaced++; continue; }   // 保留第一张稀有
-                                                if (unPool2.Count == 0) break;
-                                                var pick2 = unPool2[_rewardRng.Next(unPool2.Count)];
-                                                var inst2 = rsU.CreateCard(pick2, player);
-                                                if (inst2 != null) { list[i].ModifyCard(inst2); rareCount--; ZLog.W("reward rare cap -> " + inst2.Id.Entry); }
-                                            }
-                                            catch { }
-                                        }
-                                    }
-                                }
-                                catch (Exception eR2) { ZLog.W("reward rare cap fail " + eR2.Message); }
                             }
                         }
                     }
                     catch (Exception eUR) { ZLog.W("unbound reward pool fail " + eUR.Message); }
                 }
+                // 全模式稀有卡限 1（3.3.5）
+                try { ApplyRareCap(list, player, "reward"); } catch { }
                 // 保底：3 选 1 中至少 2 张是吱咿专属卡（用原版牌占位则替换）
                 try
                 {
@@ -3785,17 +4384,24 @@ namespace Zhiji
             catch (Exception e) { ZLog.W("reward bias fail " + e.Message); }
         }
 
+        // 跑局期间是否吱咿（缓存兜底）
+        // 事件在"房间切换中"生成选项时，RunManager.DebugOnlyGetState() 偶尔拿不到玩家，
+        // 旧实现直接 return false，导致事件劫持被跳过、显示成原版事件（玩家看到的就是"事件出 bug"）。
+        static volatile bool _zhijiRunCached;
+
         static bool IsZhijiRun()
         {
             try
             {
                 var rm = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
                 var rs = rm != null ? rm.DebugOnlyGetState() : null;
-                if (rs == null || rs.Players == null || rs.Players.Count == 0) return false;
+                if (rs == null || rs.Players == null || rs.Players.Count == 0) return _zhijiRunCached;
                 var p = rs.Players[0];
-                return p != null && p.Character != null && p.Character.Id.Entry == "ZHIJI";
+                bool ok = p != null && p.Character != null && p.Character.Id.Entry == "ZHIJI";
+                _zhijiRunCached = ok;      // 拿到状态就以它为准（非吱咿会立刻清掉缓存）
+                return ok;
             }
-            catch { return false; }
+            catch { return _zhijiRunCached; }
         }
 
         static bool _forceHatchCached;
@@ -3811,6 +4417,23 @@ namespace Zhiji
             try { var a = GameAsm(); return a != null ? a.GetType(name, false) : null; } catch { return null; }
         }
         public static bool RedHeartArtActive => _redHeartArtActive;
+
+        // 命令文本被统一转小写，按名字找类型时必须忽略大小写
+        static Type FindGameTypeCI(string shortName)
+        {
+            try
+            {
+                var asm = GameAsm();
+                if (asm == null) return null;
+                foreach (var t in asm.GetTypes())
+                {
+                    if (t == null) continue;
+                    if (string.Equals(t.Name, shortName, StringComparison.OrdinalIgnoreCase)) return t;
+                }
+            }
+            catch { }
+            return null;
+        }
 
         public static bool ShouldForceRedGodHeart(MegaCrit.Sts2.Core.Models.EventModel ev)
         {
@@ -3874,7 +4497,7 @@ namespace Zhiji
             try
             {
                 if (__result == null) return;
-                if (ForceHatchCached || ShouldForceHatch(__result))
+                if (ShouldForceHatch(__result))
                 {
                     var host = MegaCrit.Sts2.Core.Models.ModelDb.Event<MegaCrit.Sts2.Core.Models.Events.Reflections>();
                     if (host != null) { __result = host; }
@@ -4049,7 +4672,12 @@ namespace Zhiji
                         try { if (owner.Deck != null && owner.Deck.Cards != null) foreach (var c in owner.Deck.Cards) if (c != null && c.Id.Entry.ToUpperInvariant().Contains(want)) { proto = c; break; } } catch { }
                         ZLog.W("capsule card proto " + want + " = " + (proto != null ? proto.Id.Entry : "null"));
                         if (proto == null) continue;
-                        var inst = rs != null ? rs.CreateCard(proto, owner) : null;
+                        // 牌组里拿到的是可变实例，引擎拒绝（"Mutable model ... used in incorrect place"）；
+                        // 必须用 ModelDb 里的 canonical 模型来 CreateCard。
+                        MegaCrit.Sts2.Core.Models.CardModel canonical = null;
+                        try { canonical = MegaCrit.Sts2.Core.Models.ModelDb.GetByIdOrNull<MegaCrit.Sts2.Core.Models.CardModel>(proto.Id); } catch { }
+                        if (canonical == null) { ZLog.W("capsule card canonical null " + proto.Id.Entry); continue; }
+                        var inst = rs != null ? rs.CreateCard(canonical, owner) : null;
                         if (inst == null) continue;
                         _ = MegaCrit.Sts2.Core.Commands.CardPileCmd.Add(inst, MegaCrit.Sts2.Core.Entities.Cards.PileType.Deck, MegaCrit.Sts2.Core.Entities.Cards.CardPilePosition.Bottom, null, false);
                         ZLog.W("capsule card added " + inst.Id.Entry);
@@ -4088,7 +4716,15 @@ namespace Zhiji
                 var tree = Godot.Engine.GetMainLoop() as Godot.SceneTree;
                 if (tree == null) return;
                 var t = new Godot.Timer(); t.WaitTime = 0.25; t.OneShot = true;
-                t.Timeout += () => { try { ApplyEventArt(__instance); } catch { } };
+                t.Timeout += () =>
+                {
+                    try
+                    {
+                        if (__instance == null || !Godot.GodotObject.IsInstanceValid(__instance)) { ZLog.W("event art timer skipped (room freed)"); return; }
+                        ApplyEventArt(__instance);
+                    }
+                    catch { }
+                };
                 tree.Root.CallDeferred(Godot.Node.MethodName.AddChild, t);
             }
             catch (Exception e) { ZLog.W("event ready fail " + e.Message); }
@@ -4098,6 +4734,8 @@ namespace Zhiji
         {
             try
             {
+                // 关键：本方法会由 0.25s 定时器回调（房间可能已释放），未校验就访问会原生崩溃
+                if (room == null || !Godot.GodotObject.IsInstanceValid(room)) { ZLog.W("event art skipped (room freed)"); return; }
                 var tex = Art.Get("event_red_heart");
                 if (tex == null) { ZLog.W("event art missing"); return; }
                 try { if (room.VfxContainer != null) room.VfxContainer.Visible = false; } catch { }
@@ -4107,7 +4745,7 @@ namespace Zhiji
                 while (stack.Count > 0)
                 {
                     var n = stack.Pop();
-                    if (n == null) continue;
+                    if (n == null || !Godot.GodotObject.IsInstanceValid(n)) continue;
                     foreach (var ch in n.GetChildren()) if (ch is Godot.Node cn) stack.Push(cn);
                     if (n is Godot.TextureRect tr && tr.Texture != null && tr.Size.X > 200)
                     {
@@ -4136,7 +4774,9 @@ namespace Zhiji
                         catch { }
                     }
                 }
-                ZLog.W("event art applied=" + applied + " candidates=" + seen);
+                // 隐藏原版场景的前景剪影 / 特效层（与 Visuals 周期路径共用同一实现）
+                int hid = Visuals.HideVanillaEventDecor(room, true);
+                ZLog.W("event art applied=" + applied + " candidates=" + seen + " hiddenScene=" + hid);
             }
             catch (Exception e) { ZLog.W("event art apply fail " + e.Message); }
         }
@@ -4239,8 +4879,10 @@ namespace Zhiji
                 var pl = rs != null && rs.Players != null && rs.Players.Count > 0 ? rs.Players[0] : null;
                 if (pl == null) return false;
                 if (pl.Relics != null) foreach (var r in pl.Relics) if (r is UnboundHeart) return false;
-                if (_forceHatchCached) return true;
                 if (ZhijiStore.HasOnce(pl, "hatch_seen")) return false;
+                // 用缓存前先刷新，避免开局缓存为 true 后一直把之后的事件标题盖成「孵化完成」
+                try { RefreshForceHatchCache(); } catch { }
+                if (_forceHatchCached) return true;
                 int actH = 0;
                 try { actH = pl.RunState.CurrentActIndex; } catch { }
                 return actH == 0;   // 红神的摇篮只在第一层出现一次
@@ -4283,7 +4925,7 @@ namespace Zhiji
                     var fn = __instance.GetType().FullName;
                     if (!IsZhijiRun()) return true;
                     if (ShouldForceRedGodHeart(__instance)) { __result = RedGodHeartEvent.Title(); return false; }
-                    if (ForceHatchCached || ShouldForceHatch(__instance)) { __result = HatchEvent.Title(); return false; }
+                    if (ShouldForceHatch(__instance)) { __result = HatchEvent.Title(); return false; }
                     if (fn == DinerEvent.Hijacked) { __result = DinerEvent.Title(); return false; }
                     if (!IsZhijiRun()) return true;
                     if (fn == RedCradleEvent.Hijacked) { __result = RedCradleEvent.Title(); return false; }
@@ -4297,7 +4939,7 @@ namespace Zhiji
                     if (fn == WarCouncilEvent.Hijacked) { __result = WarCouncilEvent.Title(); return false; }
                     if (fn == HarvestFestivalEvent.Hijacked) { __result = HarvestFestivalEvent.Title(); return false; }
                     if (fn == HatchEvent.Hijacked || fn == HatchEvent.HijackedB || fn == HatchEvent.HijackedC) { __result = HatchEvent.Title(); return false; }
-                    if (ForceHatchCached || ShouldForceHatch(__instance)) { __result = HatchEvent.Title(); return false; }
+                    if (ShouldForceHatch(__instance)) { __result = HatchEvent.Title(); return false; }
                 }
             }
             catch { }
@@ -4313,7 +4955,7 @@ namespace Zhiji
                     var fn = __instance.GetType().FullName;
                     if (!IsZhijiRun()) return true;
                     if (ShouldForceRedGodHeart(__instance)) { __result = RedGodHeartEvent.InitialDescription(); return false; }
-                    if (ForceHatchCached || ShouldForceHatch(__instance)) { __result = HatchEvent.InitialDescription(); return false; }
+                    if (ShouldForceHatch(__instance)) { __result = HatchEvent.InitialDescription(); return false; }
                     if (fn == DinerEvent.Hijacked) { __result = DinerEvent.InitialDescription(); return false; }
                     if (!IsZhijiRun()) return true;
                     if (fn == RedCradleEvent.Hijacked) { __result = RedCradleEvent.InitialDescription(); return false; }
@@ -4327,7 +4969,7 @@ namespace Zhiji
                     if (fn == WarCouncilEvent.Hijacked) { __result = WarCouncilEvent.InitialDescription(); return false; }
                     if (fn == HarvestFestivalEvent.Hijacked) { __result = HarvestFestivalEvent.InitialDescription(); return false; }
                     if (fn == HatchEvent.Hijacked || fn == HatchEvent.HijackedB || fn == HatchEvent.HijackedC) { __result = HatchEvent.InitialDescription(); return false; }
-                    if (ForceHatchCached || ShouldForceHatch(__instance)) { __result = HatchEvent.InitialDescription(); return false; }
+                    if (ShouldForceHatch(__instance)) { __result = HatchEvent.InitialDescription(); return false; }
                 }
             }
             catch { }
@@ -4486,6 +5128,12 @@ namespace Zhiji
         {
             try
             {
+                try
+                {
+                    ZLog.W("diner options probe inst=" + (__instance != null ? __instance.GetType().FullName : "null")
+                        + " zhijiRun=" + IsZhijiRun() + " opts=" + (__result != null ? __result.Count : -1));
+                }
+                catch { }
                 if (!IsZhijiRun()) return true;
                 if (__instance != null && __instance.GetType().FullName == DinerEvent.Hijacked)
                 {
@@ -4764,12 +5412,71 @@ namespace Zhiji
             catch { }
         }
 
+        // ===== 黄金寿衣（3.3.3）：流血中的敌人无法回复生命 =====
+        // 背景：流血已取消层数上限后，寿衣只剩「施加流血 ×1.5」，作为稀有遗物价值偏低；
+        // 而 DOT 流最怕遇到会回血的敌人。寿衣改为：身上有流血的敌人，回复被完全阻止。
+
+        // 找到带黄金寿衣的吱咿玩家（单人：通常只有一位）
+        static Player ShroudOwnerOf(MegaCrit.Sts2.Core.Entities.Creatures.Creature c)
+        {
+            try
+            {
+                var cs = c != null ? c.CombatState : null;
+                if (cs == null || cs.Players == null) return null;
+                foreach (var p in cs.Players)
+                {
+                    if (p == null || p.Character == null || p.Character.Id.Entry != "ZHIJI") continue;
+                    bool on = false;
+                    try { on = ZhijiStore.Of(p).GoldShroud; } catch { }
+                    if (!on)
+                    {
+                        try { on = p.Relics != null && p.Relics.Any(r => r is GoldenShroud); } catch { }
+                    }
+                    if (on) return p;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        public static void HealInternalPrefix(MegaCrit.Sts2.Core.Entities.Creatures.Creature __instance, ref decimal amount)
+        {
+            try
+            {
+                if (amount <= 0) return;
+                if (__instance == null || __instance.IsDead) return;
+                if (__instance.IsPlayer) return;          // 玩家自身回复不受限
+                if (__instance.PetOwner != null) return;  // 自己的血肉/眷属不受限
+                if (ShroudOwnerOf(__instance) == null) return;
+                int bleed = 0;
+                try { bleed = __instance.GetPowerAmount<BleedPower>(); } catch { }
+                if (bleed <= 0) return;                   // 没流血的敌人正常回血
+                ZLog.W("shroud blocks heal " + amount + " bleed=" + bleed);
+                amount = 0;
+            }
+            catch { }
+        }
+
         static readonly Random _redRng = new Random();
 
         // ===== 形态切换：用引擎原生 CardCmd.Transform 原位替换 =====
         static bool _transforming;
         static bool _winResolved;
         static bool _enemyBuffed;   // 本场战斗是否已强化敌人
+        // 卡片"数值签名"：费用 + 所有动态数值 + 是否已升级
+        static string CardSig(MegaCrit.Sts2.Core.Models.CardModel c)
+        {
+            var sb = new System.Text.StringBuilder();
+            try { sb.Append("c=").Append(c.EnergyCost != null ? c.EnergyCost.GetResolved() : -1); } catch { }
+            try { foreach (var kv in c.DynamicVars) sb.Append('|').Append(kv.Key).Append('=').Append(kv.Value.BaseValue); } catch { }
+            try { sb.Append("|up=").Append(c.IsUpgraded); } catch { }
+            return sb.ToString();
+        }
+
+        static object _autoslayer;
+
+        public static int EnemyBaseHpCount() { try { return _enemyBaseHp.Count; } catch { return -1; } }
+
         static readonly System.Collections.Generic.Dictionary<object, int> _enemyBaseHp
             = new System.Collections.Generic.Dictionary<object, int>();
         static bool _rebuilding;    // 正在重建红神手牌（期间禁止再替换）
@@ -5440,7 +6147,7 @@ namespace Zhiji
                 var tree = Godot.Engine.GetMainLoop() as Godot.SceneTree;
                 if (tree == null) return;
                 var room = MegaCrit.Sts2.Core.Nodes.Rooms.NCombatRoom.Instance;
-                if (room == null) return;
+                if (room == null || !Godot.GodotObject.IsInstanceValid(room)) return;
                 int hidden = 0;
                 var stack = new System.Collections.Generic.Stack<Godot.Node>();
                 stack.Push(room);
@@ -5663,73 +6370,282 @@ namespace Zhiji
             catch (Exception e) { ZLog.W("copy engine log fail " + e.Message); }
         }
 
-        public static void TryEmergencyDeath()
-        {
-            try
-            {
-                var cm = MegaCrit.Sts2.Core.Combat.CombatManager.Instance;
-                if (cm == null) return;
-                var cs = cm.DebugOnlyGetState();
-                if (cs == null || cs.Players == null || cs.Players.Count == 0) return;
-                var pl = cs.Players[0];
-                if (pl == null || pl.Creature == null) return;
-                if ((int)pl.Creature.CurrentHp > 0) return;
-                var st = ZhijiStore.Of(pl);
-                if (st.DeathHandled) return;
-                st.DeathHandled = true;
-                st.AutoPlayPending = false;
-                ZLog.W("emergency death -> HandlePlayerDeath hp=" + pl.Creature.CurrentHp);
-                try { Visuals.HideOverlay(); Visuals.RestorePlayerCreature(); } catch { }
-                _ = cm.HandlePlayerDeath(cm.CurrentCombatId, pl);
-                TryLoseCombat(cm, pl);
-            }
-            catch (Exception e) { ZLog.W("emergency death fail " + e.Message); }
-        }
+        // ===== 死亡结算（3.3.2 重做）=====
+        // 旧实现的问题：三处（回合开始 / tick / 视觉 tick）各自 `_ = HandlePlayerDeath(...)`，
+        // 紧接着又用反射去乱调 LoseCombat，async 竞态 + 早于 pending-loss 登记，
+        // 结果 HP=0 时仍停在战斗界面（待办 #1）。
+        // 新实现：统一入口 → await HandlePlayerDeath（带超时兜底）→ 下一帧在主线程调 LoseCombat()。
+        static bool _deathLosePending;
+        static double _deathLoseDueMsec;
+        static bool _defeatScreenShown;
+        static string _deathTag = "death";
 
-        static void TryLoseCombat(object cm, object player)
+        // 当前战斗房间（PendingLoss 需要）
+        static MegaCrit.Sts2.Core.Rooms.CombatRoom CurrentCombatRoomDebug()
         {
             try
             {
                 var rm = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
-                var objs = new List<object> { cm, rm };
-                try { var rs = rm != null ? rm.DebugOnlyGetState() : null; if (rs != null) objs.Add(rs); } catch { }
-                foreach (var o in objs)
-                {
-                    if (o == null) continue;
-                    foreach (var m in o.GetType().GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
-                    {
-                        if (m.Name != "LoseCombat" && m.Name != "LoseRun" && m.Name != "EndRun") continue;
-                        try
-                        {
-                            var ps = m.GetParameters();
-                            var args = new object[ps.Length];
-                            for (int i = 0; i < ps.Length; i++)
-                            {
-                                var pt = ps[i].ParameterType;
-                                if (pt == typeof(bool)) args[i] = false;
-                                else if (pt.IsValueType) args[i] = Activator.CreateInstance(pt);
-                                else args[i] = pt.IsInstanceOfType(player) ? player : null;
-                            }
-                            var r = m.Invoke(o, args);
-                            ZLog.W("LoseCombat invoked " + m.Name + " on " + o.GetType().Name + " args=" + ps.Length + " -> " + (r ?? "null"));
-                            return;
-                        }
-                        catch (Exception e) { ZLog.W("LoseCombat fail " + m.Name + " " + e.GetBaseException().Message); }
-                    }
-                }
-                ZLog.W("LoseCombat: no method found");
+                var rs = rm != null ? rm.DebugOnlyGetState() : null;
+                if (rs == null) return null;
+                return rs.CurrentRoom as MegaCrit.Sts2.Core.Rooms.CombatRoom;
             }
-            catch (Exception e) { ZLog.W("LoseCombat probe fail " + e.Message); }
+            catch { return null; }
+        }
+
+        // 等价引擎的死亡登记：把「本场要输」记到 CombatTurnState.PendingLoss
+        // 注意：CombatManager.LiveTurnStateFor / PendingLossState 都是 internal，只能反射。
+        static object LiveTurnState(object cm)
+        {
+            try
+            {
+                var mi = cm.GetType().GetMethod("LiveTurnStateFor",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+                if (mi == null) return null;
+                var idProp = cm.GetType().GetProperty("CurrentCombatId",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+                var id = idProp != null ? idProp.GetValue(cm) : null;
+                return mi.Invoke(cm, new object[] { id });
+            }
+            catch (Exception e) { ZLog.W("turn state fail " + e.GetBaseException().Message); return null; }
+        }
+
+        static bool MarkPendingLoss(object cm, object turnState)
+        {
+            try
+            {
+                if (cm == null || turnState == null) return false;
+                var prop = turnState.GetType().GetProperty("PendingLoss",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+                if (prop == null) { ZLog.W("pending: no PendingLoss prop"); return false; }
+                if (prop.GetValue(turnState) != null) return true;   // 已登记
+                var room = CurrentCombatRoomDebug();
+                if (room == null) { ZLog.W("pending: no combat room"); return false; }
+                var inst = Activator.CreateInstance(prop.PropertyType, new object[] { room });
+                prop.SetValue(turnState, inst);
+                return true;
+            }
+            catch (Exception e) { ZLog.W("pending fail " + e.GetBaseException().Message); return false; }
+        }
+
+        static bool ProcessPendingLoss(object cm, object turnState)
+        {
+            try
+            {
+                var mi = cm.GetType().GetMethod("ProcessPendingLoss",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+                if (mi == null) { ZLog.W("process: method not found"); return false; }
+                mi.Invoke(cm, new object[] { turnState });
+                return true;
+            }
+            catch (Exception e) { ZLog.W("process fail " + e.GetBaseException().Message); return false; }
+        }
+
+        // 兜底入口：tick 里发现玩家已死但引擎没结算时调用（幂等）
+        public static void EnsureDeathSettled(Player player, string tag)
+        {
+            try
+            {
+                if (player == null || player.Creature == null) return;
+                if (!player.Creature.IsDead && player.Creature.CurrentHp > 0) return;
+                var st = ZhijiStore.Of(player);
+                if (st.DeathHandled) return;
+                st.DeathHandled = true;
+                st.AutoPlayPending = false;
+                var cm = MegaCrit.Sts2.Core.Combat.CombatManager.Instance;
+                if (cm == null || !cm.IsInProgress)
+                {
+                    ZLog.W(tag + ": death, no live combat (settle skipped)");
+                    return;
+                }
+                ZLog.W(tag + ": death settle start hp=" + player.Creature.CurrentHp
+                    + " aboutToLose=" + cm.IsAboutToLose + " ending=" + cm.IsEnding);
+                // 死亡表现：收起立绘、藏掉原版角色、改显示「肉堆」死亡贴图
+                try
+                {
+                    bool red = st.Form == ZhijiForm.RedGod;
+                    Visuals.HideOverlay();
+                    Visuals.HidePlayerCreature(player);
+                    Visuals.ShowDeathSprite(red);
+                }
+                catch (Exception ev) { ZLog.W(tag + ": death visuals fail " + ev.Message); }
+                _deathTag = tag;
+                _ = SettleDeathAsync(cm, cm.CurrentCombatId, player, tag);
+            }
+            catch (Exception e) { ZLog.W(tag + ": death settle fail " + e.Message); }
+        }
+
+        static async System.Threading.Tasks.Task SettleDeathAsync(
+            MegaCrit.Sts2.Core.Combat.CombatManager cm,
+            MegaCrit.Sts2.Core.Combat.CombatId? id,
+            Player player, string tag)
+        {
+            bool done = false;
+            try
+            {
+                var death = cm.HandlePlayerDeath(id, player);
+                // HandlePlayerDeath 会等回合循环，循环停摆时可能永不完成：超时后照样继续收尾
+                var timeout = System.Threading.Tasks.Task.Delay(2000);
+                done = await System.Threading.Tasks.Task.WhenAny(death, timeout) == death;
+                if (done) { try { await death; } catch (Exception ed) { ZLog.W(tag + ": HandlePlayerDeath threw " + ed.GetBaseException().Message); } }
+            }
+            catch (Exception e) { ZLog.W(tag + ": settle async fail " + e.GetBaseException().Message); }
+            try
+            {
+                ZLog.W(tag + ": HandlePlayerDeath done=" + done + " aboutToLose=" + cm.IsAboutToLose
+                    + " inProgress=" + cm.IsInProgress + " ending=" + cm.IsEnding);
+            }
+            catch { }
+            // 交给主线程下一帧执行：先给引擎 0.25s 自己处理 pending loss，避免重复结算
+            _deathLoseDueMsec = Godot.Time.GetTicksMsec() + 50;
+            _deathLosePending = true;
+        }
+
+        // 由 _Process 在主线程调用（每帧）
+        public static void FlushDeathLose()
+        {
+            if (!_deathLosePending) return;
+            try
+            {
+                if (Godot.Time.GetTicksMsec() < _deathLoseDueMsec) return;
+                var cm = MegaCrit.Sts2.Core.Combat.CombatManager.Instance;
+                string tag = _deathTag ?? "death";
+                if (cm == null) { _deathLosePending = false; ZLog.W(tag + ": flush lose skipped (no manager)"); return; }
+                if (!cm.IsInProgress) { _deathLosePending = false; ZLog.W(tag + ": flush lose skipped (combat ended)"); return; }
+                if (cm.IsEnding) { _deathLosePending = false; ZLog.W(tag + ": flush lose skipped (engine already ending)"); return; }
+                _deathLosePending = false;
+                // 引擎链路：PendingLoss 登记后由 ProcessPendingLoss 结束战斗
+                var ts = LiveTurnState(cm);
+                if (ts != null && MarkPendingLoss(cm, ts))
+                {
+                    bool ok = ProcessPendingLoss(cm, ts);
+                    ZLog.W(tag + ": flush ProcessPendingLoss ok=" + ok + " inProgress=" + cm.IsInProgress);
+                }
+                // 战斗界面已收尾，再弹战败结算
+                ShowDefeatScreen();
+            }
+            catch (Exception e)
+            {
+                _deathLosePending = false;
+                ZLog.W((_deathTag ?? "death") + ": flush lose fail " + e.GetBaseException().Message);
+            }
+        }
+
+        // 战败界面：RunManager.OnEnded(false) -> NGameOverScreen.Create -> NOverlayStack.Push
+        static bool ShowDefeatScreen()
+        {
+            if (_defeatScreenShown) return true;
+            try
+            {
+                var rm = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                var rs = rm != null ? rm.DebugOnlyGetState() : null;
+                if (rm == null || rs == null) { ZLog.W("defeat: no run state"); return false; }
+                var serialized = rm.OnEnded(false);
+                ZLog.W("defeat: OnEnded(false) -> " + (serialized != null ? "ok" : "null") + " gameOver=" + rm.IsGameOver);
+                var screen = MegaCrit.Sts2.Core.Nodes.Screens.GameOverScreen.NGameOverScreen.Create(rs, serialized);
+                var stack = MegaCrit.Sts2.Core.Nodes.Screens.Overlays.NOverlayStack.Instance;
+                if (screen == null || stack == null) { ZLog.W("defeat: screen/stack null"); return false; }
+                stack.Push(screen);
+                _defeatScreenShown = true;
+                ZLog.W("defeat: game over screen pushed");
+                return true;
+            }
+            catch (Exception e) { ZLog.W("defeat: push fail " + e.GetBaseException().Message); return false; }
+        }
+
+        // tick 兜底：扫描玩家血量为 0 但引擎还没结算的情况
+        public static void TickDeathSettle()
+        {
+            try
+            {
+                FlushDeathLose();
+                var cm = MegaCrit.Sts2.Core.Combat.CombatManager.Instance;
+                if (cm == null || !cm.IsInProgress) return;
+                var cs = cm.DebugOnlyGetState();
+                if (cs == null || cs.Players == null) return;
+                foreach (var pl in cs.Players)
+                {
+                    if (pl == null || pl.Creature == null) continue;
+                    if (!pl.Creature.IsDead && pl.Creature.CurrentHp > 0) continue;
+                    EnsureDeathSettled(pl, "tick");
+                }
+            }
+            catch (Exception e) { ZLog.W("tick death settle fail " + e.Message); }
         }
 
         public static void CombatEndPrefix()
         {
-            try { Visuals.HideOverlay(); Visuals.RestorePlayerCreature(); } catch (Exception e) { ZLog.W("combat end hide fail " + e.Message); }
+            try
+            {
+                Visuals.HideOverlay();
+                if (PlayerDeathHandled())
+                {
+                    // 死亡结算：保持原版角色隐藏，死亡贴图留在屏幕上（战败界面背景）
+                    var plD = CurrentPlayer();
+                    if (plD != null)
+                    {
+                        try { Visuals.HidePlayerCreature(plD); } catch { }
+                        try { Visuals.ShowDeathSprite(ZhijiStore.Of(plD).Form == ZhijiForm.RedGod); } catch { }
+                    }
+                    ZLog.W("combat end: keep death sprite");
+                }
+                else
+                {
+                    Visuals.RestorePlayerCreature();
+                }
+            }
+            catch (Exception e) { ZLog.W("combat end hide fail " + e.Message); }
+        }
+
+        // 结算/战败界面被推入时回调
+        public static void OverlayPushPostfix(MegaCrit.Sts2.Core.Nodes.Screens.Overlays.IOverlayScreen screen)
+        {
+            try
+            {
+                if (screen == null) return;
+                string n = screen.GetType().Name;
+                if (!n.Contains("GameOver")) return;
+                ZLog.W("game over screen pushed -> hide self-drawn");
+                Visuals.HideAllSelfDrawn("game over");
+            }
+            catch (Exception e) { ZLog.W("overlay push postfix fail " + e.Message); }
+        }
+
+        // 当前玩家
+        static Player CurrentPlayer()
+        {
+            try
+            {
+                var cm = MegaCrit.Sts2.Core.Combat.CombatManager.Instance;
+                var cs = cm != null ? cm.DebugOnlyGetState() : null;
+                if (cs != null && cs.Players != null && cs.Players.Count > 0) return cs.Players[0];
+            }
+            catch { }
+            try
+            {
+                var rm = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                var rs = rm != null ? rm.DebugOnlyGetState() : null;
+                if (rs != null && rs.Players != null && rs.Players.Count > 0) return rs.Players[0];
+            }
+            catch { }
+            return null;
+        }
+
+        // 玩家是否已走死亡结算（用于视觉分支）
+        static bool PlayerDeathHandled()
+        {
+            try
+            {
+                var pl = CurrentPlayer();
+                if (pl == null) return false;
+                return ZhijiStore.Of(pl).DeathHandled;
+            }
+            catch { return false; }
         }
 
         public static void CombatUiExitPostfix(object __instance)
         {
-            try { Visuals.HideOverlay(); Visuals.RestorePlayerCreature(); Visuals.Despawn(); } catch (Exception e) { ZLog.W("ui exit fail " + e.Message); }
+            try { Visuals.HideOverlay(); Visuals.RestorePlayerCreature(); Visuals.HideDeathSprite("ui exit"); Visuals.Despawn(); } catch (Exception e) { ZLog.W("ui exit fail " + e.Message); }
         }
 
         public static void CreateVisualsPostfix(object __instance, object __result)
@@ -6050,13 +6966,20 @@ namespace Zhiji
                     var cmG = MegaCrit.Sts2.Core.Combat.CombatManager.Instance;
                     var csG = cmG != null ? cmG.DebugOnlyGetState() : null;
                     var plG = csG != null && csG.Players != null && csG.Players.Count > 0 ? csG.Players[0] : null;
+                    // 每场战斗刷新"是否吱咿"缓存，避免上一局的缓存影响这一局
+                    try { _zhijiRunCached = plG != null && plG.Character != null && plG.Character.Id.Entry == "ZHIJI"; } catch { }
                     if (plG == null || plG.Character == null || plG.Character.Id.Entry != "ZHIJI") return;
                 }
                 catch { return; }
                 ZhijiHooks.OnCombatSetUp();
                 _redOrigin.Clear();
                 _pendingOrigin.Clear();
+                // 敌人基础血量缓存按场次存活：不清会一直持有旧战斗的 Creature（内存泄漏）
+                try { _enemyBaseHp.Clear(); } catch { }
                 _winResolved = false;
+                // 每场战斗重置死亡收尾状态，否则第二次死亡不会弹结算界面
+                _defeatScreenShown = false;
+                _deathLosePending = false;
                 _enemyBuffed = false;
                 _redHandPending = 0;
                 _lastRebuildTurn = -1;
