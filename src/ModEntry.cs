@@ -629,7 +629,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.17");
+                ZLog.W("entry build 3.3.18");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -5023,7 +5023,6 @@ namespace Zhiji
                     if (fn == HungerTheaterEvent.Hijacked) { __result = HungerTheaterEvent.Title(); return false; }
                     if (fn == WarCouncilEvent.Hijacked) { __result = WarCouncilEvent.Title(); return false; }
                     if (fn == HarvestFestivalEvent.Hijacked) { __result = HarvestFestivalEvent.Title(); return false; }
-                    if (fn == HatchEvent.Hijacked || fn == HatchEvent.HijackedB || fn == HatchEvent.HijackedC) { __result = HatchEvent.Title(); return false; }
                     if (ShouldForceHatch(__instance)) { __result = HatchEvent.Title(); return false; }
                 }
             }
@@ -5053,7 +5052,6 @@ namespace Zhiji
                     if (fn == HungerTheaterEvent.Hijacked) { __result = HungerTheaterEvent.InitialDescription(); return false; }
                     if (fn == WarCouncilEvent.Hijacked) { __result = WarCouncilEvent.InitialDescription(); return false; }
                     if (fn == HarvestFestivalEvent.Hijacked) { __result = HarvestFestivalEvent.InitialDescription(); return false; }
-                    if (fn == HatchEvent.Hijacked || fn == HatchEvent.HijackedB || fn == HatchEvent.HijackedC) { __result = HatchEvent.InitialDescription(); return false; }
                     if (ShouldForceHatch(__instance)) { __result = HatchEvent.InitialDescription(); return false; }
                 }
             }
@@ -5067,7 +5065,9 @@ namespace Zhiji
             {
                 if (!IsZhijiRun()) return true;
                 if (ShouldForceRedGodHeart(__instance)) { __result = RedGodHeartEvent.BuildOptions(__instance); return false; }
-                if (__instance != null && (__instance.GetType().FullName == HatchEvent.Hijacked || __instance.GetType().FullName == HatchEvent.HijackedB || __instance.GetType().FullName == HatchEvent.HijackedC))
+                // 3.3.18：必须连同 ShouldForceHatch 一起判断。原来只看宿主类型，
+                // 导致拿过失控之心 / 已孵化后，进这些宿主仍反复出现「孵化完成」事件（可重复领奖）。
+                if (ShouldForceHatch(__instance))
                 {
                     __result = HatchEvent.BuildOptions(__instance);
                     return false;
