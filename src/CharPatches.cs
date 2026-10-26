@@ -199,6 +199,38 @@ namespace Zhiji
                 }
                 tr.Texture = tex;
                 tr.Visible = true;
+                // 3.3.29：选人页「变身演出 开/关」按钮（玩家能找到的正式入口）
+                try
+                {
+                    Godot.Button btn = null;
+                    foreach (var c in cont.GetChildren())
+                        if (c is Godot.Button b0 && b0.Name.ToString() == "ZhijiAnimToggle") { btn = b0; break; }
+                    if (btn == null || !Godot.GodotObject.IsInstanceValid(btn))
+                    {
+                        btn = new Godot.Button();
+                        btn.Name = "ZhijiAnimToggle";
+                        btn.SetAnchorsPreset(Godot.Control.LayoutPreset.TopLeft);
+                        btn.Position = new Vector2(60, 640);
+                        btn.Size = new Vector2(240, 52);
+                        cont.AddChild(btn);
+                        var bRef = btn;
+                        btn.Pressed += () =>
+                        {
+                            try
+                            {
+                                ZhijiPrefs.AnimOn = !ZhijiPrefs.AnimOn;
+                                ZhijiPrefs.Save();
+                                bRef.Text = "变身演出：" + (ZhijiPrefs.AnimOn ? "开" : "关");
+                                ZLog.W("select toggle animOn=" + ZhijiPrefs.AnimOn);
+                            }
+                            catch { }
+                        };
+                        ZLog.W("select anim toggle created");
+                    }
+                    btn.Text = "变身演出：" + (ZhijiPrefs.AnimOn ? "开" : "关");
+                    btn.Visible = true;
+                }
+                catch (Exception eTog) { ZLog.W("select toggle fail " + eTog.Message); }
             }
             catch (Exception e) { ZLog.W("select bg fail " + e.Message); }
         }
