@@ -648,7 +648,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.21");
+                ZLog.W("entry build 3.3.22");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -3416,6 +3416,43 @@ namespace Zhiji
                     var plSB = CurrentPlayer();
                     if (plSB == null) ZLog.W("t:sumbuff no player");
                     else RewardSummonBuff(plSB);
+                }
+                if (cmd && cmdText == "t:famine")
+                {
+                    // 直接跑一次"幼年形态饥饿自损"（不需要等敌人回合），用于验证致死逻辑
+                    try
+                    {
+                        var plF2 = CurrentPlayer();
+                        if (plF2 == null || plF2.Creature == null) ZLog.W("t:famine no player");
+                        else
+                        {
+                            var stF2 = ZhijiStore.Of(plF2);
+                            int maxHp2 = (int)plF2.Creature.MaxHp;
+                            double k2 = 0.06;
+                            bool pet2 = (stF2.MinionHp > 0 || stF2.MinionHp2 > 0)
+                                || (plF2.Osty != null && !plF2.Osty.IsDead && plF2.Osty.CurrentHp > 0);
+                            if (pet2) k2 *= 0.5;
+                            int loss2 = (int)System.Math.Ceiling(maxHp2 * (stF2.Hunger / 100.0) * k2);
+                            int cap2 = (int)System.Math.Ceiling(maxHp2 * 0.08);
+                            if (loss2 > cap2) loss2 = cap2;
+                            decimal hpB = plF2.Creature.CurrentHp;
+                            if (loss2 > 0)
+                            {
+                                ZhijiPatcher.BypassStand = true;
+                                plF2.Creature.LoseHpInternal(loss2, MegaCrit.Sts2.Core.ValueProps.ValueProp.Unpowered);
+                                ZhijiPatcher.BypassStand = false;
+                                if (loss2 >= hpB && !plF2.Creature.IsDead && (int)plF2.Creature.CurrentHp > 0)
+                                {
+                                    plF2.Creature.SetCurrentHpInternal(0);
+                                    ZLog.W("t:famine LETHAL hunger=" + stF2.Hunger + " loss=" + loss2 + " hp " + hpB + " -> 0");
+                                    ZhijiPatcher.EnsureDeathSettled(plF2, "famine-debug");
+                                }
+                                else ZLog.W("t:famine hunger=" + stF2.Hunger + " loss=" + loss2 + " hp=" + plF2.Creature.CurrentHp);
+                            }
+                            else ZLog.W("t:famine loss=0 hunger=" + stF2.Hunger);
+                        }
+                    }
+                    catch (Exception eF2) { ZLog.W("t:famine fail " + eF2.GetBaseException().Message); }
                 }
                 if (cmd && cmdText.StartsWith("t:hurt:"))
                 {
