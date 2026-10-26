@@ -22,11 +22,20 @@ grep -m1 "entry build" /tmp/sts_start.log || { echo "启动失败"; exit 1; }
 W=$(xdotool search --name 'Slay the Spire 2' | tail -1)
 xdotool windowfocus "$W"
 
-CLICK 863 719 6      # 单人模式
+# 有存档时菜单第一项是「继续游戏」、第二项是「放弃」（会弹确认框）：
+# 先点掉可能的确认框，再点第一项（有档=继续 / 无档=单人模式）
+CLICK 800 722 2      # 不了（无弹框时无副作用）
+CLICK 863 675 8      # 继续游戏 / 单人模式
+if grep -qE "RUN character=ZHIJI|room entered" "$LOG" 2>/dev/null; then
+  echo "直接进入已有存档：$(tail -1 "$LOG" | sed 's/^\[[0-9:.]*\] //')"
+  exit 0
+fi
+CLICK 800 722 2
+CLICK 863 719 6      # 单人模式（无档布局）
 CLICK 558 421 7      # 标准模式
 
 picked=""
-for X in 1211 1270 1152 1089 1034 968 913 845 795 723 666 600; do
+for X in $(seq 580 55 1400); do
   CLICK "$X" 972 2
   S=$(last_select)
   if [ "$S" = "ZHIJI" ]; then picked=$X; echo "选中吱咿：x=$X"; break; fi
