@@ -155,6 +155,7 @@ namespace Zhiji
                 ZLog.W("SCREEN select " + (characterModel != null ? characterModel.Id.Entry : "?") + " name=" + nl + " embarkDisabled=" + dis);
                 if (characterModel is Zhiji)
                 {
+                    try { EnsureAnimToggle(); } catch (Exception eT) { ZLog.W("anim toggle fail " + eT.Message); }
                     // 3.3.14：背景图解码+建纹理是同步开销，放在 SelectCharacter 里会让"出战按钮"
                     // 晚一步才可用（AutoSlay/连点会点空）。改为延后一帧执行。
                     try
@@ -166,6 +167,52 @@ namespace Zhiji
                 }
             }
             catch (Exception e) { ZLog.W("screen select log fail " + e.Message); }
+        }
+
+        // 3.3.30：选人页「变身演出 开/关」按钮，独立挂在 Root 上（不依赖选人页容器）
+        static Godot.CanvasLayer _animToggleLayer;
+        static Godot.Button _animToggleBtn;
+
+        public static void EnsureAnimToggle()
+        {
+            try
+            {
+                var tree = Godot.Engine.GetMainLoop() as Godot.SceneTree;
+                if (tree == null) return;
+                if (_animToggleLayer != null && Godot.GodotObject.IsInstanceValid(_animToggleLayer))
+                {
+                    if (_animToggleBtn != null && Godot.GodotObject.IsInstanceValid(_animToggleBtn))
+                        _animToggleBtn.Text = "变身演出：" + (ZhijiPrefs.AnimOn ? "开" : "关");
+                    _animToggleLayer.Visible = true;
+                    return;
+                }
+                ZhijiPrefs.Load();
+                _animToggleLayer = new Godot.CanvasLayer();
+                _animToggleLayer.Layer = 80;
+                _animToggleLayer.Name = "ZhijiAnimToggleLayer";
+                tree.Root.AddChild(_animToggleLayer);
+                var btn = new Godot.Button();
+                btn.Name = "ZhijiAnimToggle";
+                btn.Text = "变身演出：" + (ZhijiPrefs.AnimOn ? "开" : "关");
+                btn.Position = new Vector2(60, 640);
+                btn.Size = new Vector2(240, 52);
+                _animToggleLayer.AddChild(btn);
+                _animToggleBtn = btn;
+                var bRef = btn;
+                btn.Pressed += () =>
+                {
+                    try
+                    {
+                        ZhijiPrefs.AnimOn = !ZhijiPrefs.AnimOn;
+                        ZhijiPrefs.Save();
+                        bRef.Text = "变身演出：" + (ZhijiPrefs.AnimOn ? "开" : "关");
+                        ZLog.W("anim toggle clicked animOn=" + ZhijiPrefs.AnimOn);
+                    }
+                    catch { }
+                };
+                ZLog.W("anim toggle created (root layer)");
+            }
+            catch (Exception e) { ZLog.W("ensure anim toggle fail " + e.Message); }
         }
 
         // 选人界面的背景大图：用我们自己的立绘替换铁甲战士的场景
