@@ -166,6 +166,8 @@ namespace Zhiji
             try
             {
                 if (play == null) return;
+                // 3.3.42 诊断：确认 Self 类卡的 play.Target 是否为空（W3 判定条件依赖这一点）
+                try { ZLog.W("countuse id=" + Id.Entry + " target=" + (play.Target != null ? play.Target.Name : "null")); } catch { }
                 if (RedGod) return;                       // 红神牌不计形态计数
                 if (play.Target == null)
                 {

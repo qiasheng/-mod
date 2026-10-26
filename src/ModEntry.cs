@@ -648,7 +648,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.41");
+                ZLog.W("entry build 3.3.46");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -7576,20 +7576,8 @@ namespace Zhiji
                 }
                 catch (Exception e9) { ZLog.W("debug hp buff fail " + e9.Message); }
                 {
-                    bool inCombatNow = false;
-                    bool inShopNow = false;
-                    try { var cmv = MegaCrit.Sts2.Core.Combat.CombatManager.Instance; inCombatNow = cmv != null && cmv.IsInProgress; } catch { }
-                    try
-                    {
-                        var rmv = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
-                        var rsv = rmv != null ? rmv.DebugOnlyGetState() : null;
-                        var roomv = rsv != null ? rsv.CurrentRoom : null;
-                        if (roomv != null) { var rtv = roomv.RoomType.ToString(); inShopNow = rtv.Contains("Shop") || rtv.Contains("Merchant"); }
-                    }
-                    catch { }
-                    // 3.3.36（W4）：商店也要在地毯位置显示立绘
-                    if (inCombatNow || inShopNow) Visuals.ShowOverlay(ZhijiStore.CurrentForm() == ZhijiForm.RedGod);
-                    else Visuals.HideOverlay();
+                    // 3.3.46：恢复无条件显示（3.3.36 的房间门控会让战斗中立绘消失）
+                    Visuals.ShowOverlay(ZhijiStore.CurrentForm() == ZhijiForm.RedGod);
                 }
                 HookCombatEvents();
                 var cm = MegaCrit.Sts2.Core.Combat.CombatManager.Instance;
