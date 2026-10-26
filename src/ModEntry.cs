@@ -648,7 +648,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.52");
+                ZLog.W("entry build 3.3.53");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -1452,7 +1452,7 @@ namespace Zhiji
                 Godot.SceneTreeTimer Next()
                 {
                     var t = tree.CreateTimer(0.25);
-                    t.Timeout += () => { try { DebugHotkeyTick(); AutoTestTick(); Visuals.TickSceneCharacters(); Visuals.SyncOverlayForRoom(); Visuals.SyncOverlayForUI(); Visuals.SyncStatPanel(); } catch { } Next(); };
+                    t.Timeout += () => { try { DebugHotkeyTick(); AutoTestTick(); Visuals.TickSceneCharacters(); Visuals.SyncOverlayForRoom(); Visuals.SyncOverlayScale(); Visuals.SyncOverlayForUI(); Visuals.SyncStatPanel(); } catch { } Next(); };
                     return t;
                 }
                 Next();
@@ -3018,6 +3018,54 @@ namespace Zhiji
                     }
                     catch (Exception eRG) { ZLog.W("debug redgod fail " + eRG.GetBaseException().Message); }
                 }
+                if (cmd && cmdText.StartsWith("shrink:"))
+                {
+                    // 3.3.53：给玩家挂 ShrinkPower，验证「缩小 buff 立绘是否跟随」（W4）
+                    try
+                    {
+                        int nS = 1; int.TryParse(cmdText.Substring(7), out nS);
+                        if (nS <= 0) nS = 1;
+                        var plS = DebugPlayer();
+                        if (plS != null && plS.Creature != null)
+                        {
+                            _ = MegaCrit.Sts2.Core.Commands.PowerCmd.Apply<MegaCrit.Sts2.Core.Models.Powers.ShrinkPower>(null, plS.Creature, nS, plS.Creature, null, true);
+                            float nsS = -1f;
+                            try { var ncS = plS.Creature.GetCreatureNode(); if (ncS != null && Godot.GodotObject.IsInstanceValid(ncS)) nsS = ncS.Scale.X; } catch { }
+                            ZLog.W("debug shrink +" + nS + " now=" + plS.Creature.GetPowerAmount<MegaCrit.Sts2.Core.Models.Powers.ShrinkPower>() + " nodeScale=" + nsS);
+                        }
+                    }
+                    catch (Exception eSk) { ZLog.W("debug shrink fail " + eSk.GetBaseException().Message); }
+                }
+                if (cmd && cmdText == "scalecheck")
+                {
+                    try
+                    {
+                        var plSC = DebugPlayer();
+                        float ns = -1f;
+                        try { var nc = plSC != null && plSC.Creature != null ? plSC.Creature.GetCreatureNode() : null; if (nc != null && Godot.GodotObject.IsInstanceValid(nc)) ns = nc.Scale.X; } catch { }
+                        ZLog.W("scalecheck creature=" + ns + " overlay=" + Visuals.OverlayScaleDebug());
+                    }
+                    catch (Exception eSc) { ZLog.W("scalecheck fail " + eSc.GetBaseException().Message); }
+                }
+                if (cmd && cmdText.StartsWith("t:setscale:"))
+                {
+                    // 3.3.53：直接改玩家 creature 节点缩放，验证立绘是否跟随（W4）
+                    try
+                    {
+                        float nsS = 1f;
+                        float.TryParse(cmdText.Substring(11), System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out nsS);
+                        var plSS = DebugPlayer();
+                        var ncSS = plSS != null && plSS.Creature != null ? plSS.Creature.GetCreatureNode() : null;
+                        if (ncSS != null && Godot.GodotObject.IsInstanceValid(ncSS))
+                        {
+                            ncSS.Scale = new Godot.Vector2(nsS, nsS);
+                            ZLog.W("debug setscale " + nsS);
+                        }
+                        else ZLog.W("debug setscale: no creature node");
+                    }
+                    catch (Exception eSS) { ZLog.W("debug setscale fail " + eSS.GetBaseException().Message); }
+                }
                 if (cmd && cmdText.StartsWith("vile:"))
                 {
                     try
@@ -3617,15 +3665,20 @@ namespace Zhiji
                 }
                 if (cmd && cmdText == "t:dumpdeck")
                 {
-                    ZLog.W("dumpdeck ENTERED");
                     try
                     {
-                        var zd = new Zhiji();
-                        var sd = zd.StartingDeck;
-                        var sb2 = new System.Text.StringBuilder();
-                        int n2 = 0;
-                        foreach (var c in sd) { if (c == null) continue; sb2.Append(c.Id.Entry).Append(' '); n2++; }
-                        ZLog.W("dumpdeck MODEL deck n=" + n2 + " [" + sb2.ToString().Trim() + "]");
+                        // 3.3.53：不要 new Zhiji()（AbstractModel 重复注册会报 ModelDb 冲突），走 ModelDb 实例
+                        MegaCrit.Sts2.Core.Models.CharacterModel charD = null;
+                        foreach (var chD in MegaCrit.Sts2.Core.Models.ModelDb.AllCharacters) if (chD is Zhiji) { charD = chD; break; }
+                        if (charD == null) ZLog.W("dumpdeck: no character model");
+                        else
+                        {
+                            var sd = charD.StartingDeck;
+                            var sb2 = new System.Text.StringBuilder();
+                            int n2 = 0;
+                            foreach (var c in sd) { if (c == null) continue; sb2.Append(c.Id.Entry).Append(' '); n2++; }
+                            ZLog.W("dumpdeck MODEL deck n=" + n2 + " [" + sb2.ToString().Trim() + "]");
+                        }
                     }
                     catch (Exception eM2) { ZLog.W("dumpdeck model fail " + eM2.GetBaseException().Message); }
                     try

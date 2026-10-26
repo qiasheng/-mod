@@ -1224,6 +1224,32 @@ namespace Zhiji
             catch (Exception e) { ZLog.W("room gating fail " + e.Message); }
         }
 
+        // 3.3.53（W4）：立绘跟随引擎侧角色节点缩放。
+        // PlaceOverlay 只在「显示那一刻」乘一次 node.Scale，之后 buff 改变缩放不会更新；
+        // 这里每拍检查一次，变了就重算位置与缩放（只对可见立绘生效）。
+        static float _syncNodeScale = -1f;
+        public static void SyncOverlayScale()
+        {
+            try
+            {
+                if (_overlay == null || !GodotObject.IsInstanceValid(_overlay) || !_overlay.Visible) return;
+                var cm = MegaCrit.Sts2.Core.Combat.CombatManager.Instance;
+                var st = cm != null ? cm.DebugOnlyGetState() : null;
+                var pl = st != null && st.Players != null && st.Players.Count > 0 ? st.Players[0] : null;
+                var nc = pl != null && pl.Creature != null ? pl.Creature.GetCreatureNode() : null;
+                if (nc == null || !GodotObject.IsInstanceValid(nc)) { _syncNodeScale = -1f; return; }
+                float ns = nc.Scale.X;
+                if (ns <= 0.05f || ns >= 3f) return;
+                if (System.Math.Abs(ns - _syncNodeScale) < 0.005f) return;
+                _syncNodeScale = ns;
+                var tree = Engine.GetMainLoop() as SceneTree;
+                if (tree == null) return;
+                PlaceOverlay(tree.Root.GetVisibleRect().Size, _red);
+                ZLog.W("overlay scale follow node=" + ns.ToString("0.00") + " scale=" + _overlay.Scale.X.ToString("0.00"));
+            }
+            catch { }
+        }
+
         static CanvasLayer _layer;
         static AnimatedSprite2D _overlay;
         static Vector2 _overlayBase;
@@ -1245,7 +1271,7 @@ namespace Zhiji
                 if (ncS2 != null && GodotObject.IsInstanceValid(ncS2))
                 {
                     float ns = ncS2.Scale.X;
-                    if (ns > 0.05f && ns < 3f) sc *= ns;
+                    if (ns > 0.05f && ns < 3f) { sc *= ns; _syncNodeScale = ns; }   // 3.3.53：记下已应用值，避免 pump 重复重排
                 }
             }
             catch { }
@@ -1936,6 +1962,13 @@ void fragment() {
         public static bool OverlayVisible()
         {
             return _overlay != null && GodotObject.IsInstanceValid(_overlay) && _overlay.Visible;
+        }
+
+        // 3.3.53：调试用——读当前立绘缩放（<0 表示没有立绘层）
+        public static float OverlayScaleDebug()
+        {
+            try { return _overlay != null && GodotObject.IsInstanceValid(_overlay) ? _overlay.Scale.X : -1f; }
+            catch { return -2f; }
         }
 
         // ===== 一牌两用：战斗内二选一按钮 =====
