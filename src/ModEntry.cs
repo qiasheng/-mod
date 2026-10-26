@@ -648,7 +648,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.50");
+                ZLog.W("entry build 3.3.51");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -3577,6 +3577,23 @@ namespace Zhiji
                         }
                     }
                     catch (Exception eP2) { ZLog.W("t:play fail " + eP2.GetBaseException().Message); }
+                }
+                if (cmd && cmdText == "t:kw")
+                {
+                    try
+                    {
+                        var plK = CurrentPlayer();
+                        var handK = plK != null ? MegaCrit.Sts2.Core.Entities.Cards.CardPile.Get(MegaCrit.Sts2.Core.Entities.Cards.PileType.Hand, plK) : null;
+                        if (handK == null) ZLog.W("t:kw no hand");
+                        else foreach (var ck in handK.Cards)
+                        {
+                            if (ck == null) continue;
+                            var kws = new System.Text.StringBuilder();
+                            try { if (ck.Keywords != null) foreach (var k in ck.Keywords) kws.Append(k).Append(' '); } catch { kws.Append("?"); }
+                            ZLog.W("t:kw " + ck.Id.Entry + " kw=[" + kws.ToString().Trim() + "]");
+                        }
+                    }
+                    catch (Exception eK) { ZLog.W("t:kw fail " + eK.GetBaseException().Message); }
                 }
                 if (cmd && cmdText == "t:dumpdeck")
                 {
