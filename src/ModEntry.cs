@@ -648,7 +648,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.25");
+                ZLog.W("entry build 3.3.26");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -3416,6 +3416,16 @@ namespace Zhiji
                     var plSB = CurrentPlayer();
                     if (plSB == null) ZLog.W("t:sumbuff no player");
                     else RewardSummonBuff(plSB);
+                }
+                if (cmd && cmdText == "t:giveheart")
+                {
+                    try
+                    {
+                        var plG3 = CurrentPlayer();
+                        if (plG3 == null) ZLog.W("t:giveheart no player");
+                        else { _ = MegaCrit.Sts2.Core.Commands.RelicCmd.Obtain<RedGodHeart>(plG3); ZLog.W("t:giveheart granted"); }
+                    }
+                    catch (Exception eG3) { ZLog.W("t:giveheart fail " + eG3.GetBaseException().Message); }
                 }
                 if (cmd && cmdText == "t:famine")
                 {
