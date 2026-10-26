@@ -266,7 +266,12 @@ namespace Zhiji
             ModelDb.Card<MegaCrit.Sts2.Core.Models.Cards.DefendIronclad>(),
             ModelDb.Card<MegaCrit.Sts2.Core.Models.Cards.DefendIronclad>(),
             ModelDb.Card<Drive>(),
-            ModelDb.Card<PulseAid>()
+            ModelDb.Card<PulseAid>(),
+            // 3.3.33（W1）：初始牌组 8 -> 12 张：小牌组里"3打3防转起来"太稳，抽到单张强牌概率也过高
+            ModelDb.Card<Drive>(),
+            ModelDb.Card<PulseAid>(),
+            ModelDb.Card<Brace>(),
+            ModelDb.Card<FeedGuest>()
         };
 
         public override IReadOnlyList<RelicModel> StartingRelics => new[] { ModelDb.Relic<FleshStilts>() };

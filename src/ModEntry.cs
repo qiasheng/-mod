@@ -648,7 +648,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.32");
+                ZLog.W("entry build 3.3.33");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -5481,9 +5481,24 @@ namespace Zhiji
                 {
                     __result += "\n流血：每回合开始失去 1 层，并受到等于层数的伤害。";
                 }
+                // 3.3.33（W2）：占位符没被替换掉时清理，避免卡面出现 {Damage} 这类残留
+                if (!string.IsNullOrEmpty(__result) && __result.IndexOf('{') >= 0)
+                {
+                    var left = System.Text.RegularExpressions.Regex.Matches(__result, @"\{([A-Za-z_][A-Za-z0-9_]*)\}");
+                    if (left.Count > 0)
+                    {
+                        var sb = new System.Text.StringBuilder();
+                        foreach (System.Text.RegularExpressions.Match m in left) sb.Append(m.Groups[1].Value).Append(' ');
+                        if (_descLeftover.Add(__instance != null ? __instance.Id.Entry : "?"))
+                            ZLog.W("desc leftover " + (__instance != null ? __instance.Id.Entry : "?") + ": " + sb.ToString().Trim());
+                        __result = System.Text.RegularExpressions.Regex.Replace(__result, @"\{([A-Za-z_][A-Za-z0-9_]*)\}", "");
+                    }
+                }
             }
             catch { }
         }
+
+        static readonly System.Collections.Generic.HashSet<string> _descLeftover = new System.Collections.Generic.HashSet<string>();
 
         public static void CardPlayPrefix(MegaCrit.Sts2.Core.Models.CardModel __instance)
         {
@@ -7454,7 +7469,12 @@ namespace Zhiji
                     }
                 }
                 catch (Exception e9) { ZLog.W("debug hp buff fail " + e9.Message); }
-                Visuals.ShowOverlay(ZhijiStore.CurrentForm() == ZhijiForm.RedGod);
+                {
+                    bool inCombatNow = false;
+                    try { var cmv = MegaCrit.Sts2.Core.Combat.CombatManager.Instance; inCombatNow = cmv != null && cmv.IsInProgress; } catch { }
+                    if (inCombatNow) Visuals.ShowOverlay(ZhijiStore.CurrentForm() == ZhijiForm.RedGod);
+                    else Visuals.HideOverlay();
+                }
                 HookCombatEvents();
                 var cm = MegaCrit.Sts2.Core.Combat.CombatManager.Instance;
                 var st = cm != null ? cm.DebugOnlyGetState() : null;
