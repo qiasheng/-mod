@@ -747,7 +747,7 @@ namespace Zhiji
     /// 缝合：回复生命并积攒搏动（常态续航）
     public sealed class Suture : ZhijiCard
     {
-        public Suture() : base(1, CardType.Skill, CardRarity.Uncommon, TargetType.Self) { }
+        public Suture() : base(1, CardType.Skill, CardRarity.Common, TargetType.Self) { }
         protected override IEnumerable<DynamicVar> CanonicalVars => new[]
         {
             new DynamicVar("Heal", 6m),
@@ -1218,7 +1218,7 @@ namespace Zhiji
     /// 蓄势：按当前搏动获得格挡（搏动越多越硬）
     public sealed class Brace : ZhijiCard
     {
-        public Brace() : base(1, CardType.Skill, CardRarity.Uncommon, TargetType.Self) { }
+        public Brace() : base(1, CardType.Skill, CardRarity.Common, TargetType.Self) { }
         protected override IEnumerable<DynamicVar> CanonicalVars => new[] { new BlockVar(5m, ValueProp.Move) };
 
         protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
@@ -1685,7 +1685,7 @@ namespace Zhiji
     /// 卑贱清算：消耗全部卑贱之物，每层造成伤害（额外回合与爆发的抉择）
     public sealed class VileReckoning : ZhijiCard
     {
-        public VileReckoning() : base(2, CardType.Attack, CardRarity.Rare, TargetType.AnyEnemy) { }
+        public VileReckoning() : base(2, CardType.Attack, CardRarity.Uncommon, TargetType.AnyEnemy) { }
         protected override IEnumerable<DynamicVar> CanonicalVars => new DynamicVar[] { new DynamicVar("Per", 3m) };
         protected override void OnCustomUpgrade()
         {
@@ -2273,7 +2273,7 @@ namespace Zhiji
     /// 暴食：吃掉肉块换自助餐
     public sealed class DevourGuest : ZhijiCard
     {
-        public DevourGuest() : base(2, CardType.Skill, CardRarity.Rare, TargetType.Self) { }
+        public DevourGuest() : base(2, CardType.Skill, CardRarity.Uncommon, TargetType.Self) { }
         protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
         {
             CountUse(play);
@@ -2442,7 +2442,7 @@ namespace Zhiji
     /// 群宴：一次叫出两个食客（+24 血）
     public sealed class GrandBanquet : ZhijiCard
     {
-        public GrandBanquet() : base(2, CardType.Skill, CardRarity.Rare, TargetType.Self) { }
+        public GrandBanquet() : base(2, CardType.Skill, CardRarity.Uncommon, TargetType.Self) { }
         protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
         {
             St.Summon(Up ? 34 : 24, Owner != null && Owner.Relics != null && Owner.Relics.Any(r => r is DinnerBell) ? 40 : 30);
