@@ -629,7 +629,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.15");
+                ZLog.W("entry build 3.3.17");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -4522,8 +4522,13 @@ namespace Zhiji
                 if (!IsZhijiRun()) return false;
                 if (ev != null)
                 {
-                    var host = ev.GetType().Name;
-                    if (host != "DenseVegetation" && host != "SunkenTreasury") return false;
+                    // 3.3.17：原来只在 DenseVegetation/SunkenTreasury 两个宿主上劫持，
+                    // 但第二层事件是 50+ 个里随机抽，实测两局长跑（共 8 个事件房）一次都没抽到，
+                    // 等于玩家几乎遇不到红神之心。改为：非远古/开局祝福类事件都可以劫持
+                    //（与第一层「孵化」的策略一致）。
+                    var host = ev.GetType().FullName ?? "";
+                    if (host.Contains("Ancient") || host.Contains("Neow") || host.Contains("Deprecated")) return false;
+                    if (host.Contains("MockEventModel")) return false;
                 }
                 var rm = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
                 var rs = rm != null ? rm.DebugOnlyGetState() : null;
@@ -4790,7 +4795,7 @@ namespace Zhiji
                 var f = __instance.GetType().GetField("_event", BindingFlags.NonPublic | BindingFlags.Instance);
                 var model = f != null ? f.GetValue(__instance) as MegaCrit.Sts2.Core.Models.EventModel : null;
                 bool force = model != null && ShouldForceRedGodHeart(model);
-                ZLog.W("event room ready force=" + force);
+                ZLog.W("event room ready host=" + (model != null ? model.GetType().Name : "null") + " force=" + force);
                 if (!force) return;
                 _redHeartArtActive = true;
                 var tree = Godot.Engine.GetMainLoop() as Godot.SceneTree;

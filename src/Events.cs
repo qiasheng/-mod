@@ -233,7 +233,9 @@ namespace Zhiji
 
         static async Task Leave(EventModel ev)
         {
-            Finish(ev, "RED_HEART.pages.LEAVE.description");   // 3.3.10：原来错用了 DARK_DINER 的 key
+            // 饭馆自己的"离开"用的是 DARK_DINER 的结算页
+            // （3.3.10 曾误把这里改成 RED_HEART 的 key，导致饭馆显示红神之心文案）
+            Finish(ev, "DARK_DINER.pages.LEAVE.description");
             await Task.CompletedTask;
         }
     }
