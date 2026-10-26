@@ -169,7 +169,18 @@ namespace Zhiji
                 // 3.3.42 诊断：确认 Self 类卡的 play.Target 是否为空（W3 判定条件依赖这一点）
                 try { ZLog.W("countuse id=" + Id.Entry + " target=" + (play.Target != null ? play.Target.Name : "null")); } catch { }
                 if (RedGod) return;                       // 红神牌不计形态计数
-                if (play.Target == null)
+                // 3.3.50（W3）：用 TargetType 区分攻/守——群体攻击(AllEnemies)的 play.Target 也是 null，
+                // 不能只看 target 是否为空，否则 AoE 攻击会被当成"对自己打出"。
+                bool isDef = false;
+                try
+                {
+                    var tt = TargetType;
+                    isDef = tt == MegaCrit.Sts2.Core.Entities.Cards.TargetType.Self
+                         || tt == MegaCrit.Sts2.Core.Entities.Cards.TargetType.AnyPlayer
+                         || tt == MegaCrit.Sts2.Core.Entities.Cards.TargetType.AllAllies;
+                }
+                catch { isDef = play.Target == null; }
+                if (isDef)
                 {
                     St.DefCount++;
                     // 3.3.38（W3）：空放=「对自己打出」不再只是计形态，给实打实的收益：
