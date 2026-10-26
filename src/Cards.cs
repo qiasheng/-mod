@@ -659,7 +659,9 @@ namespace Zhiji
     {
         public Prepare() : base(0, CardType.Skill, CardRarity.Uncommon, TargetType.Self) { }
 
-        protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
+                // 3.3.34（W6）：0 费抽 2 在小牌组里会变成永动燃料（同「愤怒」），加消耗限一场一次
+        public override IEnumerable<CardKeyword> CanonicalKeywords => new[] { CardKeyword.Exhaust };
+protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
         {
             CountUse(play);
             St.AddPulse(Up ? 4 : 3);
@@ -1269,7 +1271,9 @@ namespace Zhiji
     public sealed class GreedySearch : ZhijiCard
     {
         public GreedySearch() : base(0, CardType.Skill, CardRarity.Uncommon, TargetType.Self) { }
-        protected override IEnumerable<DynamicVar> CanonicalVars => new[] { new BlockVar(4m, ValueProp.Move) };
+                // 3.3.34（W6）：0 费抽 2 在小牌组里会变成永动燃料（同「愤怒」），加消耗限一场一次
+        public override IEnumerable<CardKeyword> CanonicalKeywords => new[] { CardKeyword.Exhaust };
+protected override IEnumerable<DynamicVar> CanonicalVars => new[] { new BlockVar(4m, ValueProp.Move) };
 
         protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
         {
