@@ -12,6 +12,15 @@ namespace Zhiji
     public static class ZLog
     {
         const string AndroidDir = "/storage/emulated/0/Android/data/com.megacrit.sts2re/files";
+
+        // ===== 缓冲写入（3.3.15）=====
+        // 原来每行 File.AppendAllText 一次 open/write/close；长局 1600+ 行，在手机上累积成 I/O 抖动。
+        // 现在攒到 8KB 或每 1s 刷一次；异常/关键行立即刷，保证崩溃时也留有现场。
+        static readonly System.Text.StringBuilder _buf = new System.Text.StringBuilder();
+        static readonly object _bufLock = new object();
+        static long _lastFlushMs;
+        public static long FlushCount;
+        public static long LinesWritten;
         static readonly string[] Quiet = { "sync pulse", "famine preview", "autotest probe", "engine log copied", "engine log not found", "relic packed path", "patched-pre", "patched-post", "debug: cmd" };
 
         // 日志目录按平台解析（254.3 的 Windows 跳过保留；3.3.2 起 Linux/PC 也落盘，方便无头测试）
@@ -49,6 +58,32 @@ namespace Zhiji
 
         public static string LogDirPublic() { return LogDir(); }
 
+        static void Flush(string path, bool evenIfEmpty)
+        {
+            try
+            {
+                if (_buf.Length == 0 && !evenIfEmpty) return;
+                if (_buf.Length == 0) return;
+                System.IO.File.AppendAllText(path, _buf.ToString());
+                _buf.Clear();
+                _lastFlushMs = System.Environment.TickCount64;
+                FlushCount++;
+            }
+            catch { }
+        }
+
+        // 退出/交接时调用，确保缓冲区落盘
+        public static void FlushNow()
+        {
+            try
+            {
+                var dir = LogDir();
+                if (dir == null) return;
+                lock (_bufLock) Flush(System.IO.Path.Combine(dir, "zhiji_log.txt"), true);
+            }
+            catch { }
+        }
+
         public static void W(string s)
         {
             bool quiet = false;
@@ -66,13 +101,24 @@ namespace Zhiji
                     var fi = new System.IO.FileInfo(path);
                     if (fi.Exists && fi.Length > 4 * 1024 * 1024)
                     {
+                        Flush(path, true);
                         var old = System.IO.Path.Combine(dir, "zhiji_log.old.txt");
                         try { System.IO.File.Delete(old); } catch { }
                         System.IO.File.Move(path, old);
                     }
                 }
                 catch { }
-                System.IO.File.AppendAllText(path, "[" + DateTime.Now.ToString("HH:mm:ss.fff") + "] " + s + "\n");
+                lock (_bufLock)
+                {
+                    _buf.Append('[').Append(DateTime.Now.ToString("HH:mm:ss.fff")).Append("] ").Append(s).Append('\n');
+                    LinesWritten++;
+                    bool urgent = s.Contains("fail") || s.Contains("exception") || s.Contains("Fail")
+                        || s.StartsWith("entry build") || s.Contains("defeat") || s.Contains("death settle")
+                        || s.Contains("force finish");
+                    long nowMs = System.Environment.TickCount64;
+                    if (urgent || _buf.Length > 8192 || nowMs - _lastFlushMs > 1000)
+                        Flush(path, false);
+                }
             }
             catch { }
         }
@@ -583,7 +629,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.14");
+                ZLog.W("entry build 3.3.15");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -2278,7 +2324,8 @@ namespace Zhiji
                                     + " objs=" + (long)objs + " nodes=" + (long)nodes + " orphans=" + (long)orphans
                                     + " res=" + (long)res + " draws=" + (long)draws
                                     + " managedMB=" + (managed / 1048576)
-                                    + " enemyHpCache=" + EnemyBaseHpCount());
+                                    + " enemyHpCache=" + EnemyBaseHpCount()
+                                    + " logLines=" + ZLog.LinesWritten + " logFlushes=" + ZLog.FlushCount);
                             }
                             catch (Exception eM2) { ZLog.W("t:mem fail " + eM2.GetBaseException().Message); }
                         }
