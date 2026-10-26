@@ -648,7 +648,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.31");
+                ZLog.W("entry build 3.3.32");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -1045,6 +1045,8 @@ namespace Zhiji
             TryPatchPostfixTwo(harmony, "MegaCrit.Sts2.Core.Entities.Players.PlayerCombatState", "get_MaxEnergy", "MaxEnergyPostfix");
             TryPatchPostfixRef(harmony, "MegaCrit.Sts2.Core.Combat.CombatManager", "SetupPlayerTurn", "AfterSetupPlayerTurn");
             TryPatchPostfixTwo(harmony, "MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect.NCharacterSelectButton", "get_IsLocked", "CharLockPostfix");
+            // 3.3.32：新角色（吱咿）没有历史战绩 -> CharacterStats.MaxAscension = 0 -> 难度选择被禁用
+            TryPatchPostfixTwo(harmony, "MegaCrit.Sts2.Core.Saves.CharacterStats", "get_MaxAscension", "CharMaxAscensionPostfix");
             TryPatchPrefix(harmony, "MegaCrit.Sts2.Core.Models.RelicModel", "get_IconOutline", "RelicIconPrefix");
             TryPatchPrefix(harmony, "MegaCrit.Sts2.Core.Models.RelicModel", "get_Icon", "RelicIconPrefix");
             TryPatchPostfixRef(harmony, "MegaCrit.Sts2.Core.Nodes.Relics.NRelic", "Create", "NRelicCreatePostfix");
@@ -3843,6 +3845,24 @@ namespace Zhiji
         }
 
         // 自动测试期间：只允许选吱咿（其它角色视为锁定，AutoSlayer 会过滤掉）
+        // 3.3.32：吱咿的历史战绩为 0 -> MaxAscension=0 -> 选人页难度面板被禁用。
+        // 对她的数据至少放行到 1（其余角色不受影响，仍按各自解锁进度）。
+        public static void CharMaxAscensionPostfix(object __instance, ref int __result)
+        {
+            try
+            {
+                if (__result > 0 || __instance == null) return;
+                var idp = __instance.GetType().GetProperty("Id");
+                var id = idp != null ? idp.GetValue(__instance) : null;
+                string entry = "?";
+                try { var ep = id != null ? id.GetType().GetProperty("Entry") : null; entry = ep != null ? System.Convert.ToString(ep.GetValue(id)) : "?"; } catch { }
+                if (entry != "ZHIJI") return;
+                __result = 1;
+                ZLog.W("char stats: ZHIJI maxAscension 0 -> 1 (解锁难度选择)");
+            }
+            catch { }
+        }
+
         public static void CharLockPostfix(MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect.NCharacterSelectButton __instance, ref bool __result)
         {
             try
