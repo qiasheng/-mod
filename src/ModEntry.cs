@@ -277,10 +277,19 @@ namespace Zhiji
                     if (loss > capLoss) loss = capLoss;
                     if (loss > 0)
                     {
+                        decimal hpBefore = player.Creature.CurrentHp;
                         ZhijiPatcher.BypassStand = true;
                         player.Creature.LoseHpInternal(loss, MegaCrit.Sts2.Core.ValueProps.ValueProp.Unpowered);
                         ZhijiPatcher.BypassStand = false;
-                        ZLog.W("hunger bleed: hunger=" + st.Hunger + " loss=" + loss);
+                        // 3.3.21（N1/U9）：引擎会把玩家的 HP 损失钳在 1 —— 自损永远打不死人，
+                        // 导致"对爆"流派零风险（玩家只会抓抽卡+直伤）。这里让饥饿真正致命。
+                        if (loss >= hpBefore && !player.Creature.IsDead && (int)player.Creature.CurrentHp > 0)
+                        {
+                            player.Creature.SetCurrentHpInternal(0);
+                            ZLog.W("hunger bleed LETHAL: hunger=" + st.Hunger + " loss=" + loss + " hp " + hpBefore + " -> 0");
+                            ZhijiPatcher.EnsureDeathSettled(player, "famine");
+                        }
+                        else ZLog.W("hunger bleed: hunger=" + st.Hunger + " loss=" + loss + " hp=" + player.Creature.CurrentHp);
                     }
                 }
             }
@@ -639,7 +648,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.20");
+                ZLog.W("entry build 3.3.21");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
