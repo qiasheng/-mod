@@ -2158,6 +2158,14 @@ void fragment() {
                 var tree = Engine.GetMainLoop() as SceneTree;
                 if (tree == null) return;
                 StopTransform();
+                // 3.3.19：变身演出开关（user://zhiji_prefs.json）
+                ZhijiPrefs.Load();
+                if (folder == "transform" && !ZhijiPrefs.AnimOn)
+                {
+                    TransformPlayed++;
+                    ZLog.W("transform anim disabled, skip (#" + TransformPlayed + ")");
+                    return;
+                }
                 // 第二次及以后：原地变身，不再放全屏演出
                 if (folder == "transform" && TransformPlayed >= 1)
                 {
@@ -2188,7 +2196,7 @@ void fragment() {
                 if (!NoPrefetch) StartPrefetch(folder);
                 _animStartMs = Godot.Time.GetTicksMsec();
                 _animTimer = new Timer();
-                _animTimer.WaitTime = 1.0 / 30.0;
+                _animTimer.WaitTime = (1.0 / 30.0) * (ZhijiPrefs.AnimSpeed >= 2 ? 2.0 : 1.0);   // 2 倍速
                 _animTimer.Autostart = true;
                 _animTimer.Timeout += OnAnimTick;
                 tree.Root.AddChild(_animTimer);

@@ -18,6 +18,60 @@ using MegaCrit.Sts2.Core.ValueProps;
 
 namespace Zhiji
 {
+    /// <summary>3.3.19：玩家偏好（user://zhiji_prefs.json）。目前只有变身演出开关。</summary>
+    public static class ZhijiPrefs
+    {
+        const string Path = "user://zhiji_prefs.json";
+        public static bool AnimOn = true;     // 变身动画是否播放
+        public static int AnimSpeed = 1;      // 1 = 正常，2 = 两倍速
+        static bool _loaded;
+
+        public static void Load()
+        {
+            if (_loaded) return;
+            _loaded = true;
+            try
+            {
+                var gp = Godot.ProjectSettings.GlobalizePath(Path);
+                if (!System.IO.File.Exists(gp)) return;
+                var txt = System.IO.File.ReadAllText(gp);
+                int iOn = txt.IndexOf("animOn");
+                if (iOn >= 0) AnimOn = txt.IndexOf("false", iOn) != iOn + 8 && !txt.Substring(iOn, System.Math.Min(24, txt.Length - iOn)).Contains("false");
+                int iSp = txt.IndexOf("animSpeed");
+                if (iSp >= 0)
+                {
+                    int colon = txt.IndexOf(':', iSp);
+                    if (colon > 0)
+                    {
+                        var sb = new System.Text.StringBuilder();
+                        for (int i = colon + 1; i < txt.Length; i++)
+                        {
+                            char ch = txt[i];
+                            if (ch >= '0' && ch <= '9') sb.Append(ch);
+                            else if (sb.Length > 0) break;
+                        }
+                        int v;
+                        if (int.TryParse(sb.ToString(), out v)) AnimSpeed = v >= 2 ? 2 : 1;
+                    }
+                }
+                ZLog.W("prefs loaded animOn=" + AnimOn + " speed=" + AnimSpeed);
+            }
+            catch (Exception e) { ZLog.W("prefs load fail " + e.Message); }
+        }
+
+        public static void Save()
+        {
+            try
+            {
+                var gp = Godot.ProjectSettings.GlobalizePath(Path);
+                var json = "{\"animOn\":" + (AnimOn ? "true" : "false") + ",\"animSpeed\":" + AnimSpeed + "}";
+                System.IO.File.WriteAllText(gp, json);
+                ZLog.W("prefs saved " + json);
+            }
+            catch (Exception e) { ZLog.W("prefs save fail " + e.Message); }
+        }
+    }
+
     public enum ZhijiForm { Normal = 0, RedGod = 1 }
 
     // 红神三形态：由幼年期"进攻/防守"操作次数决定

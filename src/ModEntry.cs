@@ -234,7 +234,8 @@ namespace Zhiji
                     {
                         if (enemy == null || enemy.IsDead) continue;
                         enemy.LoseHpInternal(atk, MegaCrit.Sts2.Core.ValueProps.ValueProp.Unpowered);
-                        ZLog.W("minion attacked for " + atk + " (hp=" + st.MinionHp + ")");
+                        st.AddPulse(1);   // 3.3.19：召唤物输出计入搏动，召唤流也能过饥饿
+                        ZLog.W("minion attacked for " + atk + " (hp=" + st.MinionHp + ") pulse+1");
                         break;
                     }
                 }
@@ -251,7 +252,8 @@ namespace Zhiji
                     {
                         if (enemy == null || enemy.IsDead) continue;
                         enemy.LoseHpInternal(atk2, MegaCrit.Sts2.Core.ValueProps.ValueProp.Unpowered);
-                        ZLog.W("minion2 attacked for " + atk2 + " (hp=" + st.MinionHp2 + ")");
+                        st.AddPulse(1);
+                        ZLog.W("minion2 attacked for " + atk2 + " (hp=" + st.MinionHp2 + ") pulse+1");
                         break;
                     }
                 }
@@ -264,7 +266,11 @@ namespace Zhiji
                 if (st.Form == ZhijiForm.Normal && !st.GoldShroud && !st.PendingRevert && !st.Restoring && st.Hunger > 0)
                 {
                     int maxHp = (int)player.Creature.MaxHp;
-                    int loss = (int)System.Math.Ceiling(maxHp * (st.Hunger / 100.0) * 0.10);
+                    double selfK = 0.06;   // 3.3.19：0.10 -> 0.06，减轻"必须对爆"的压力
+                    bool hasPet = (st.MinionHp > 0 || st.MinionHp2 > 0)
+                        || (player.Osty != null && !player.Osty.IsDead && player.Osty.CurrentHp > 0);
+                    if (hasPet) selfK *= 0.5;   // 有召唤物在场再减半：奖励召唤流派
+                    int loss = (int)System.Math.Ceiling(maxHp * (st.Hunger / 100.0) * selfK);
                     if (loss > 0)
                     {
                         ZhijiPatcher.BypassStand = true;
@@ -629,7 +635,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.18");
+                ZLog.W("entry build 3.3.19");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -1040,7 +1046,7 @@ namespace Zhiji
                 {
                     try { if (st2 != null && st2.Players != null && st2.Players.Count > 0) Visuals.ShowDifficultyToggle(st2.Players[0]); } catch { }
                     try { Visuals.ResetTransformCount(); } catch { }
-                    try { RefreshForceHatchCache(); ZLog.W("force hatch cache=" + _forceHatchCached); }
+                    try { ZhijiPrefs.Load(); RefreshForceHatchCache(); ZLog.W("force hatch cache=" + _forceHatchCached); }
                     catch (Exception e) { ZLog.W("diff toggle hook fail " + e.Message); }
                 };
             }
@@ -1264,7 +1270,7 @@ namespace Zhiji
                 if (pl == null || pl.Character == null || pl.Character.Id.Entry != "ZHIJI") return;
                 var st = ZhijiStore.Of(pl);
                 if (st.Form != ZhijiForm.RedGod) return;
-                __result += st.RForm == RedForm.Balance ? 3 : 1;
+                __result += st.RForm == RedForm.Balance ? 1 : 1;   // 3.3.19：平衡形态不再 +3（6 能量太多）
             }
             catch { }
         }
@@ -3381,6 +3387,21 @@ namespace Zhiji
                         }
                     }
                     catch (Exception eEv2) { ZLog.W("t:evm fail " + eEv2.GetBaseException().Message); }
+                }
+                if (cmd && cmdText.StartsWith("t:anim:"))
+                {
+                    var arg = cmdText.Substring(7).Trim();
+                    if (arg == "0" || arg == "off") ZhijiPrefs.AnimOn = false;
+                    else if (arg == "1" || arg == "on") ZhijiPrefs.AnimOn = true;
+                    else if (arg == "speed2") ZhijiPrefs.AnimSpeed = 2;
+                    else if (arg == "speed1") ZhijiPrefs.AnimSpeed = 1;
+                    ZhijiPrefs.Save();
+                    ZLog.W("t:anim animOn=" + ZhijiPrefs.AnimOn + " speed=" + ZhijiPrefs.AnimSpeed);
+                }
+                if (cmd && cmdText == "t:winrun")
+                {
+                    var okW = ShowVictoryScreen("debug");
+                    ZLog.W("t:winrun ok=" + okW);
                 }
                 if (cmd && cmdText == "t:evallowed")
                 {
@@ -6381,20 +6402,53 @@ namespace Zhiji
             catch (Exception e) { ZLog.W("architect dialogue fail " + e.Message); }
         }
 
-        public static bool ArchitectWinRunPrefix(object __instance)
+        static bool _victoryShown;
+
+        // 3.3.19：WinRun 是返回 Task 的 async 方法。旧实现兜底分支 return false 跳过原方法，
+        // 会让该方法返回 null Task -> 调用方 await null 抛 NRE -> 第三层通关结算卡死。
+        // 现在：兜底时给一个已完成的 Task，并手动走与战败对称的胜利结算链路。
+        public static bool ArchitectWinRunPrefix(object __instance, ref System.Threading.Tasks.Task __result)
         {
             try
             {
                 if (__instance == null) return true;
-                if (ArchDialogue(__instance) != null) return true;      // 正常流程
+                if (ArchDialogue(__instance) != null) { ZLog.W("architect winrun: dialogue ok"); return true; }
                 var d = AnyDialogue(__instance);
-                if (d != null) { SetArchDialogue(__instance, d); ZLog.W("architect: dialogue fixed at WinRun"); return true; }
-                // 兜底：没有对话就直接结算通关，避免点「继续」没反应
-                var rm = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
-                if (rm != null) { _ = rm.WinRun(); ZLog.W("architect: direct WinRun fallback"); return false; }
+                if (d != null)
+                {
+                    SetArchDialogue(__instance, d);
+                    ZLog.W("architect winrun: dialogue fixed from set");
+                    return true;
+                }
+                ZLog.W("architect winrun: no dialogue -> force victory settle");
+                __result = System.Threading.Tasks.Task.CompletedTask;   // 绝不能返回 null Task
+                ShowVictoryScreen("architect");
+                return false;
             }
-            catch (Exception e) { ZLog.W("architect winrun fail " + e.Message); }
+            catch (Exception e) { ZLog.W("architect winrun fail " + e.GetBaseException().Message); }
             return true;
+        }
+
+        // 胜利结算：与 ShowDefeatScreen 对称（OnEnded(true) -> NGameOverScreen -> OverlayStack.Push）
+        public static bool ShowVictoryScreen(string tag)
+        {
+            if (_victoryShown) { ZLog.W("victory: already shown"); return true; }
+            try
+            {
+                var rm = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                var rs = rm != null ? rm.DebugOnlyGetState() : null;
+                if (rm == null || rs == null) { ZLog.W("victory: no run state"); return false; }
+                var serialized = rm.OnEnded(true);
+                ZLog.W("victory(" + tag + "): OnEnded(true) -> " + (serialized != null ? "ok" : "null") + " gameOver=" + rm.IsGameOver);
+                var screen = MegaCrit.Sts2.Core.Nodes.Screens.GameOverScreen.NGameOverScreen.Create(rs, serialized);
+                var stack = MegaCrit.Sts2.Core.Nodes.Screens.Overlays.NOverlayStack.Instance;
+                if (screen == null || stack == null) { ZLog.W("victory: screen/stack null"); return false; }
+                stack.Push(screen);
+                _victoryShown = true;
+                ZLog.W("victory: screen pushed");
+                return true;
+            }
+            catch (Exception e) { ZLog.W("victory: push fail " + e.GetBaseException().Message); return false; }
         }
 
         public static void StartEngineLogTimer()

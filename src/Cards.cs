@@ -555,7 +555,7 @@ namespace Zhiji
     /// 搏动打击（与「搏动援护」成对）：对敌人造成伤害并积攒搏动
     public sealed class PulseStrike : ZhijiCard
     {
-        public PulseStrike() : base(1, CardType.Attack, CardRarity.Rare, TargetType.TargetedNoCreature) { }
+        public PulseStrike() : base(2, CardType.Attack, CardRarity.Rare, TargetType.TargetedNoCreature) { }
         protected override IEnumerable<DynamicVar> CanonicalVars => new DynamicVar[] { new DamageVar(12m, ValueProp.Move), new BlockVar(7m, ValueProp.Move) };
 
         protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
@@ -580,7 +580,7 @@ namespace Zhiji
     /// 逃离·掩护（与「逃离」成对）：护住自己并积攒搏动
     public sealed class EscapeCover : ZhijiCard
     {
-        public EscapeCover() : base(1, CardType.Skill, CardRarity.Uncommon, TargetType.TargetedNoCreature) { }
+        public EscapeCover() : base(2, CardType.Skill, CardRarity.Uncommon, TargetType.TargetedNoCreature) { }
         protected override IEnumerable<DynamicVar> CanonicalVars => new[] { new BlockVar(3m, ValueProp.Move) };
 
         protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
@@ -772,7 +772,7 @@ namespace Zhiji
     /// 啜饮：攻击并吸血（伤害的一半转为治疗）
     public sealed class Siphon : ZhijiCard
     {
-        public Siphon() : base(1, CardType.Attack, CardRarity.Uncommon, TargetType.AnyEnemy) { }
+        public Siphon() : base(2, CardType.Attack, CardRarity.Uncommon, TargetType.AnyEnemy) { }
         protected override IEnumerable<DynamicVar> CanonicalVars => new[]
         {
             new DamageVar(6m, ValueProp.Move),
@@ -995,7 +995,7 @@ namespace Zhiji
     /// 饱食：本场战斗提升盛宴（越打越强）
     public sealed class GluttonRite : ZhijiCard
     {
-        public GluttonRite() : base(1, CardType.Skill, CardRarity.Uncommon, TargetType.Self) { }
+        public GluttonRite() : base(2, CardType.Skill, CardRarity.Uncommon, TargetType.Self) { }
         protected override IEnumerable<DynamicVar> CanonicalVars => new DynamicVar[]
         {
             new DynamicVar("Feast", 4m),
@@ -1451,7 +1451,7 @@ namespace Zhiji
         protected override IEnumerable<DynamicVar> CanonicalVars => new DynamicVar[]
         {
             new DynamicVar("Bleed", 5m),
-            new DynamicVar("Hp", 4m)
+            new DynamicVar("Hp", 6m)
         };
         protected override void OnCustomUpgrade()
         {
@@ -1685,7 +1685,7 @@ namespace Zhiji
     /// 卑贱清算：消耗全部卑贱之物，每层造成伤害（额外回合与爆发的抉择）
     public sealed class VileReckoning : ZhijiCard
     {
-        public VileReckoning() : base(1, CardType.Attack, CardRarity.Rare, TargetType.AnyEnemy) { }
+        public VileReckoning() : base(2, CardType.Attack, CardRarity.Rare, TargetType.AnyEnemy) { }
         protected override IEnumerable<DynamicVar> CanonicalVars => new DynamicVar[] { new DynamicVar("Per", 3m) };
         protected override void OnCustomUpgrade()
         {
@@ -1885,7 +1885,7 @@ namespace Zhiji
     /// 饥饿契约（能力）：每回合开始额外获得饥饿，加快变身
     public sealed class HungerPact : ZhijiCard
     {
-        public HungerPact() : base(1, CardType.Power, CardRarity.Rare, TargetType.Self) { }
+        public HungerPact() : base(2, CardType.Power, CardRarity.Rare, TargetType.Self) { }
         protected override IEnumerable<DynamicVar> CanonicalVars => new DynamicVar[] { new DynamicVar("Hunger", 3m) };
         protected override void OnCustomUpgrade()
         {
@@ -2035,7 +2035,7 @@ namespace Zhiji
     public sealed class FeastCall : ZhijiCard
     {
         public FeastCall() : base(1, CardType.Skill, CardRarity.Uncommon, TargetType.Self) { }
-        protected override IEnumerable<DynamicVar> CanonicalVars => new DynamicVar[] { new DynamicVar("Base", 8m) };
+        protected override IEnumerable<DynamicVar> CanonicalVars => new DynamicVar[] { new DynamicVar("Base", 10m) };
         protected override void OnCustomUpgrade()
         {
             if (DynamicVars.ContainsKey("Base")) DynamicVars["Base"].UpgradeValueBy(2m);
@@ -2043,7 +2043,7 @@ namespace Zhiji
         protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
         {
             CountUse(play);
-            int hp = System.Math.Min(40, DV("Base", 8) + St.Feast / 2);
+            int hp = System.Math.Min(50, DV("Base", 10) + St.Feast / 2);
             await SummonOsty(ctx, hp);
             Sync(ctx);
         }
@@ -2125,7 +2125,7 @@ namespace Zhiji
     /// 血爪：攻击并附加流血
     public sealed class BloodClaw : ZhijiCard
     {
-        public BloodClaw() : base(1, CardType.Attack, CardRarity.Uncommon, TargetType.AnyEnemy) { }
+        public BloodClaw() : base(2, CardType.Attack, CardRarity.Uncommon, TargetType.AnyEnemy) { }
         protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
         {
             CountUse(play);
@@ -2141,7 +2141,7 @@ namespace Zhiji
     /// 血神共鸣（能力）：血肉每回合追加一次攻击
     public sealed class BloodResonance : ZhijiCard
     {
-        public BloodResonance() : base(1, CardType.Power, CardRarity.Rare, TargetType.Self) { }
+        public BloodResonance() : base(2, CardType.Power, CardRarity.Rare, TargetType.Self) { }
         protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
         {
             CountUse(play);
@@ -2154,7 +2154,7 @@ namespace Zhiji
     /// 巨化：血肉最大生命 +6 并治疗 3
     public sealed class GiantGrowth : ZhijiCard
     {
-        public GiantGrowth() : base(1, CardType.Skill, CardRarity.Uncommon, TargetType.Self) { }
+        public GiantGrowth() : base(2, CardType.Skill, CardRarity.Uncommon, TargetType.Self) { }
         protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
         {
             CountUse(play);
@@ -2223,7 +2223,7 @@ namespace Zhiji
                 lost = System.Math.Max(0, (int)Owner.Osty.CurrentHp / 2);
                 try { Owner.Osty.LoseHpInternal(lost, MegaCrit.Sts2.Core.ValueProps.ValueProp.Unpowered); } catch { }
             }
-            int aoe = System.Math.Max(6, lost);
+            int aoe = System.Math.Max(10, lost);
             var cs = Owner.Creature != null ? Owner.Creature.CombatState : null;
             if (cs != null && cs.Enemies != null)
                 foreach (var e in cs.Enemies)
@@ -2242,8 +2242,8 @@ namespace Zhiji
         protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
         {
             CountUse(play);
-            int hp = System.Math.Max(8, 8 + St.Feast / 2);
-            if (OstyAlive) { Owner.Osty.SetMaxHpInternal(Owner.Osty.MaxHp + 2); Owner.Osty.HealInternal(2); St.AddFeast(3); ZLog.W("multiply: osty +2 max"); }
+            int hp = System.Math.Max(12, 12 + St.Feast / 2);
+            if (OstyAlive) { Owner.Osty.SetMaxHpInternal(Owner.Osty.MaxHp + 2); Owner.Osty.HealInternal(2); St.AddFeast(3); St.MinionHp2 = System.Math.Max(St.MinionHp2, hp); ZLog.W("multiply: osty +2 max, minion2 hp=" + St.MinionHp2); }
             else await SummonOsty(ctx, hp);
             Sync(ctx);
         }
@@ -2320,7 +2320,7 @@ namespace Zhiji
     /// 失控·贪食（击杀回血）
     public sealed class UnboundGluttony : ZhijiCard
     {
-        public UnboundGluttony() : base(1, CardType.Attack, CardRarity.Uncommon, TargetType.AnyEnemy) { }
+        public UnboundGluttony() : base(2, CardType.Attack, CardRarity.Uncommon, TargetType.AnyEnemy) { }
         protected override IEnumerable<DynamicVar> CanonicalVars => new DynamicVar[] { new DamageVar(12m, ValueProp.Move) };
         protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
         {
@@ -2356,7 +2356,7 @@ namespace Zhiji
     /// 失控·咆哮（全体 + 流血）
     public sealed class UnboundRoar : ZhijiCard
     {
-        public UnboundRoar() : base(1, CardType.Attack, CardRarity.Rare, TargetType.AllEnemies) { }
+        public UnboundRoar() : base(2, CardType.Attack, CardRarity.Rare, TargetType.AllEnemies) { }
         protected override IEnumerable<DynamicVar> CanonicalVars => new DynamicVar[] { new DamageVar(6m, ValueProp.Move) };
         protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
         {
