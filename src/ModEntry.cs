@@ -235,6 +235,7 @@ namespace Zhiji
                         if (enemy == null || enemy.IsDead) continue;
                         enemy.LoseHpInternal(atk, MegaCrit.Sts2.Core.ValueProps.ValueProp.Unpowered);
                         st.AddPulse(1);   // 3.3.19：召唤物输出计入搏动，召唤流也能过饥饿
+                        st.AddHunger(-1);  // 3.3.20：咬一口也在"进食"，饥饿下降
                         ZLog.W("minion attacked for " + atk + " (hp=" + st.MinionHp + ") pulse+1");
                         break;
                     }
@@ -271,6 +272,9 @@ namespace Zhiji
                         || (player.Osty != null && !player.Osty.IsDead && player.Osty.CurrentHp > 0);
                     if (hasPet) selfK *= 0.5;   // 有召唤物在场再减半：奖励召唤流派
                     int loss = (int)System.Math.Ceiling(maxHp * (st.Hunger / 100.0) * selfK);
+                    // 3.3.20（U9）：封顶，避免"拖长战局被自损暴毙"的设计漏洞
+                    int capLoss = (int)System.Math.Ceiling(maxHp * 0.08);
+                    if (loss > capLoss) loss = capLoss;
                     if (loss > 0)
                     {
                         ZhijiPatcher.BypassStand = true;
@@ -635,7 +639,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.19");
+                ZLog.W("entry build 3.3.20");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -3397,6 +3401,28 @@ namespace Zhiji
                     else if (arg == "speed1") ZhijiPrefs.AnimSpeed = 1;
                     ZhijiPrefs.Save();
                     ZLog.W("t:anim animOn=" + ZhijiPrefs.AnimOn + " speed=" + ZhijiPrefs.AnimSpeed);
+                }
+                if (cmd && cmdText == "t:sumbuff")
+                {
+                    var plSB = CurrentPlayer();
+                    if (plSB == null) ZLog.W("t:sumbuff no player");
+                    else RewardSummonBuff(plSB);
+                }
+                if (cmd && cmdText == "t:hand")
+                {
+                    try
+                    {
+                        var plH = CurrentPlayer();
+                        var hand = plH != null ? MegaCrit.Sts2.Core.Entities.Cards.CardPile.Get(MegaCrit.Sts2.Core.Entities.Cards.PileType.Hand, plH) : null;
+                        if (hand == null) ZLog.W("t:hand no hand");
+                        else
+                        {
+                            var sb = new System.Text.StringBuilder();
+                            foreach (var c in hand.Cards) sb.Append(c.Id.Entry).Append('(').Append(c.EnergyCost != null ? c.EnergyCost.GetResolved().ToString() : "?").Append(") ");
+                            ZLog.W("t:hand " + sb.ToString().Trim());
+                        }
+                    }
+                    catch (Exception eH) { ZLog.W("t:hand fail " + eH.Message); }
                 }
                 if (cmd && cmdText == "t:winrun")
                 {
@@ -6430,6 +6456,35 @@ namespace Zhiji
         }
 
         // 胜利结算：与 ShowDefeatScreen 对称（OnEnded(true) -> NGameOverScreen -> OverlayStack.Push）
+        // 3.3.19：给召唤物加成 -> 累计次数，并给手牌里的「万灵盛宴」减 1 费（最低 1）
+        public static void RewardSummonBuff(Player pl)
+        {
+            try
+            {
+                if (pl == null) return;
+                var st = ZhijiStore.Of(pl);
+                st.SummonBuff++;
+                var hand = MegaCrit.Sts2.Core.Entities.Cards.CardPile.Get(MegaCrit.Sts2.Core.Entities.Cards.PileType.Hand, pl);
+                int n = 0;
+                if (hand != null && hand.Cards != null)
+                {
+                    foreach (var c in hand.Cards)
+                    {
+                        if (!(c is FeastFinale)) continue;
+                        var ec = c.EnergyCost;
+                        if (ec == null) continue;
+                        int before = ec.GetResolved();
+                        if (before <= 1) continue;
+                        ec.UpgradeBy(-1);
+                        try { ec.FinalizeUpgrade(); } catch { }
+                        if (ec.GetResolved() < before) n++;
+                    }
+                }
+                ZLog.W("summon buff #" + st.SummonBuff + " -> feast finale -" + n + " cost");
+            }
+            catch (Exception e) { ZLog.W("summon buff fail " + e.Message); }
+        }
+
         public static bool ShowVictoryScreen(string tag)
         {
             if (_victoryShown) { ZLog.W("victory: already shown"); return true; }
@@ -7799,6 +7854,8 @@ namespace Zhiji
                     {"blood_vessel.description", "获得 1 层【血之容器】：[gold]流血[/gold]上限 +10（升级 +15）。"},
                     {"blood_echo.title", "血之回响"},
                     {"blood_echo.description", "获得 1 层【血之回响】：每回合第一次施加[gold]流血[/gold]时，抽 1 张牌。"},
+                    {"feast_finale.title", "万灵盛宴"},
+                    {"feast_finale.description", "对所有敌人造成 {Damage} 点伤害（+[gold]自助餐[/gold]/2 + 每次召唤加成×2）。\n每给【[gold]血肉[/gold]】加成一次，本牌费用 -1（最低 1）。"},
                     {"feast_call.title", "开席"},
                     {"feast_call.description", "撕下一块[gold]血肉[/gold]（失去 2 点生命），召唤【血肉】（生命 = {Base} + [gold]自助餐[/gold]/2，上限 20）。"},
                     {"feed_guest.title", "喂食"},

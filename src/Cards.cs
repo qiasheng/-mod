@@ -2045,6 +2045,8 @@ namespace Zhiji
             CountUse(play);
             int hp = System.Math.Min(50, DV("Base", 10) + St.Feast / 2);
             await SummonOsty(ctx, hp);
+            ZhijiPatcher.RewardSummonBuff(Owner);
+            St.AddHunger(-8);   // 3.3.20：喂血肉能压饥饿——召唤流成为"管理自损"的正解
             Sync(ctx);
         }
     }
@@ -2065,6 +2067,8 @@ namespace Zhiji
             if (OstyAlive) { Owner.Osty.SetMaxHpInternal(Owner.Osty.MaxHp + add); Owner.Osty.HealInternal(add); }
             else await SummonOsty(ctx, add);
             St.AddFeast(2);
+            ZhijiPatcher.RewardSummonBuff(Owner);
+            St.AddHunger(-6);
             ZLog.W("feed guest +" + add + " feast+2");
             Sync(ctx);
             await Task.CompletedTask;
@@ -2159,6 +2163,7 @@ namespace Zhiji
         {
             CountUse(play);
             if (OstyAlive) { Owner.Osty.SetMaxHpInternal(Owner.Osty.MaxHp + 6); Owner.Osty.HealInternal(3); }
+            ZhijiPatcher.RewardSummonBuff(Owner);
             ZLog.W("giant growth +6 max");
             Sync(ctx);
         }
@@ -2245,6 +2250,7 @@ namespace Zhiji
             int hp = System.Math.Max(12, 12 + St.Feast / 2);
             if (OstyAlive) { Owner.Osty.SetMaxHpInternal(Owner.Osty.MaxHp + 2); Owner.Osty.HealInternal(2); St.AddFeast(3); St.MinionHp2 = System.Math.Max(St.MinionHp2, hp); ZLog.W("multiply: osty +2 max, minion2 hp=" + St.MinionHp2); }
             else await SummonOsty(ctx, hp);
+            ZhijiPatcher.RewardSummonBuff(Owner);
             Sync(ctx);
         }
     }
@@ -2376,6 +2382,31 @@ namespace Zhiji
             ZLog.W("unbound roar aoe=" + dmg + " selfloss=3");
             Sync(ctx);
             await Task.CompletedTask;
+        }
+    }
+
+    /// 万灵盛宴（3.3.19）：召唤流终结技。5 费，每给血肉加成一次永久 -1 费（最低 1）。
+    public sealed class FeastFinale : ZhijiCard
+    {
+        public FeastFinale() : base(5, CardType.Attack, CardRarity.Rare, TargetType.AllEnemies) { }
+        protected override IEnumerable<DynamicVar> CanonicalVars => new DynamicVar[] { new DamageVar(10m, ValueProp.Move) };
+        protected override void OnCustomUpgrade()
+        {
+            if (DynamicVars.ContainsKey("Damage")) DynamicVars["Damage"].UpgradeValueBy(4m);
+        }
+        protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
+        {
+            CountUse(play);
+            int bonus = St.Feast / 2 + St.SummonBuff * 2;
+            int dmg = ScaleDamage(DV("Damage", 10) + bonus, play.Target);
+            var foes = Owner.Creature.CombatState.Enemies.ToList();
+            foreach (var e in foes)
+            {
+                if (e == null || e.IsDead || e.CurrentHp <= 0) continue;
+                await DamageCmd.Attack(dmg).FromCard(this, play).Targeting(e).WithHitFx("vfx/vfx_attack_slash").Execute(ctx);
+            }
+            ZLog.W("feast finale dmg=" + dmg + " feast=" + St.Feast + " buffs=" + St.SummonBuff);
+            Sync(ctx);
         }
     }
 

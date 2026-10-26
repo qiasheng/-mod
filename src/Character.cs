@@ -135,6 +135,7 @@ namespace Zhiji
                 C<DineTogether>(),
                 C<SacrificeGuest>(),
                 C<MultiplyGuest>(),
+                C<FeastFinale>(),   // 3.3.20：召唤流终结技（5 费，随召唤加成减费）
                 C<ProtectGuest>(),
                 C<DevourGuest>(),
                 C<LullabyGuest>(),

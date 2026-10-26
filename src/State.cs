@@ -116,6 +116,7 @@ namespace Zhiji
         public bool Restoring;   // 回落幼年、正在归还手牌（此期间禁止红神牌转化）
         public bool HpInit;      // 开局 72/132：第一次进战斗时把当前血量压到 72
         public int AtkCount;      // 对敌人出牌次数
+        public int SummonBuff;    // 3.3.19：给召唤物加成的次数（用于「万灵盛宴」减费）
         public int DefCount;      // 对自己/空放出牌次数
         public RedForm RForm = RedForm.Balance;   // 当前红神形态（变身时按 Atk/Def 决定）
 
@@ -133,7 +134,7 @@ namespace Zhiji
 
         public void AddHunger(int n)
         {
-            Hunger = Math.Min(100, Hunger + n);
+            Hunger = Math.Min(100, Math.Max(0, Hunger + n));
             int c = Hunger / 10;
             if (c > Craving) Craving = c;
         }
