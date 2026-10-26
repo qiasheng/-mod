@@ -1198,6 +1198,20 @@ namespace Zhiji
             float frameH = 320f;
             float h = vp.Y * (red ? 0.42f : 0.22f);    // 屏幕高度占比（红神/失控放大，恢复变身后的压迫感）
             float sc = h / frameH;
+            // 3.3.36（W4）：立绘跟随引擎侧角色节点的缩放（缩小类 buff 才会真的把立绘缩小）
+            try
+            {
+                var cmS2 = MegaCrit.Sts2.Core.Combat.CombatManager.Instance;
+                var stS2 = cmS2 != null ? cmS2.DebugOnlyGetState() : null;
+                var plS2 = stS2 != null && stS2.Players != null && stS2.Players.Count > 0 ? stS2.Players[0] : null;
+                var ncS2 = plS2 != null && plS2.Creature != null ? plS2.Creature.GetCreatureNode() : null;
+                if (ncS2 != null && GodotObject.IsInstanceValid(ncS2))
+                {
+                    float ns = ncS2.Scale.X;
+                    if (ns > 0.05f && ns < 3f) sc *= ns;
+                }
+            }
+            catch { }
             _overlay.Centered = true;
             _overlay.FlipH = red;                       // 红神原图朝左，翻转后朝右
             _overlay.Scale = new Vector2(sc, sc);

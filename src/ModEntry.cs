@@ -648,7 +648,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.35");
+                ZLog.W("entry build 3.3.36");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -730,7 +730,10 @@ namespace Zhiji
                         tried++;
                         try
                         {
-                            if (cand.TryManualPlay(pass)) { ok = true; pick = cand; break; }
+                            BypassEmptyGate = (pass == null);      // 3.3.36：自动出牌的空放放行
+                            bool playedNow = cand.TryManualPlay(pass);
+                            BypassEmptyGate = false;
+                            if (playedNow) { ok = true; pick = cand; break; }
                             failed++;
                             fails.Append(cand.Id.Entry + " ");
                         }
@@ -991,6 +994,7 @@ namespace Zhiji
                 else ZLog.W("energy icon getter not found");
             }
             catch (Exception eEI) { ZLog.W("energy icon patch fail " + eEI.Message); }
+            TryPatchPrefix(harmony, "MegaCrit.Sts2.Core.Models.CardModel", "TryManualPlay", "ManualPlayPrefix");
             TryPatchPrefixEx(harmony, "MegaCrit.Sts2.Core.Entities.Creatures.Creature", "LoseHpInternal", "LoseHpPrefix");
             TryPatchPostfixTwo(harmony, "MegaCrit.Sts2.Core.Entities.Creatures.Creature", "LoseHpInternal", "LoseHpPostfix");
             // 3.3.3：黄金寿衣 —— 流血中的敌人无法回复生命
@@ -3847,6 +3851,52 @@ namespace Zhiji
         // 自动测试期间：只允许选吱咿（其它角色视为锁定，AutoSlayer 会过滤掉）
         // 3.3.32：吱咿的历史战绩为 0 -> MaxAscension=0 -> 选人页难度面板被禁用。
         // 对她的数据至少放行到 1（其余角色不受影响，仍按各自解锁进度）。
+        // 3.3.36（W3）：空放（无目标出牌）容易误触 —— 必须有意识：按住 Shift 才算"对自己打出"。
+        public static bool BypassEmptyGate;
+        static Godot.Label _hintLabel;
+        static ulong _hintUntil;
+
+        public static bool ManualPlayPrefix(MegaCrit.Sts2.Core.Models.CardModel __instance, MegaCrit.Sts2.Core.Entities.Creatures.Creature target)
+        {
+            try
+            {
+                if (target != null) return true;                      // 打到敌人：正常
+                if (!(__instance is ZhijiCard)) return true;          // 只管我们自己的卡
+                if (BypassEmptyGate) return true;                     // 自动出牌/内部调用放行
+                bool shift = false;
+                try { shift = Godot.Input.IsKeyPressed(Godot.Key.Shift); } catch { }
+                if (shift) return true;                               // 按住 Shift = 对自己打出（防守计数）
+                ShowHint("对自己打出：按住 Shift 再点 / 打敌人请拖到目标上");
+                ZLog.W("empty play blocked (hold Shift to self-target) card=" + (__instance != null ? __instance.Id.Entry : "?"));
+                return false;
+            }
+            catch { return true; }
+        }
+
+        static void ShowHint(string text)
+        {
+            try
+            {
+                var tree = Godot.Engine.GetMainLoop() as Godot.SceneTree;
+                if (tree == null) return;
+                if (_hintLabel == null || !Godot.GodotObject.IsInstanceValid(_hintLabel))
+                {
+                    var layer = new Godot.CanvasLayer(); layer.Layer = 95; layer.Name = "ZhijiHintLayer";
+                    tree.Root.AddChild(layer);
+                    _hintLabel = new Godot.Label();
+                    _hintLabel.AddThemeFontSizeOverride("font_size", 26);
+                    _hintLabel.Position = new Godot.Vector2(60, 120);
+                    layer.AddChild(_hintLabel);
+                }
+                _hintLabel.Text = "⚠ " + text;
+                _hintLabel.Visible = true;
+                _hintUntil = Godot.Time.GetTicksMsec() + 2500;
+                var tmr = tree.CreateTimer(2.6);
+                tmr.Timeout += () => { try { if (_hintLabel != null && Godot.GodotObject.IsInstanceValid(_hintLabel)) _hintLabel.Visible = false; } catch { } };
+            }
+            catch { }
+        }
+
         public static void CharMaxAscensionPostfix(object __instance, ref int __result)
         {
             try
@@ -7471,8 +7521,18 @@ namespace Zhiji
                 catch (Exception e9) { ZLog.W("debug hp buff fail " + e9.Message); }
                 {
                     bool inCombatNow = false;
+                    bool inShopNow = false;
                     try { var cmv = MegaCrit.Sts2.Core.Combat.CombatManager.Instance; inCombatNow = cmv != null && cmv.IsInProgress; } catch { }
-                    if (inCombatNow) Visuals.ShowOverlay(ZhijiStore.CurrentForm() == ZhijiForm.RedGod);
+                    try
+                    {
+                        var rmv = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                        var rsv = rmv != null ? rmv.DebugOnlyGetState() : null;
+                        var roomv = rsv != null ? rsv.CurrentRoom : null;
+                        if (roomv != null) { var rtv = roomv.RoomType.ToString(); inShopNow = rtv.Contains("Shop") || rtv.Contains("Merchant"); }
+                    }
+                    catch { }
+                    // 3.3.36（W4）：商店也要在地毯位置显示立绘
+                    if (inCombatNow || inShopNow) Visuals.ShowOverlay(ZhijiStore.CurrentForm() == ZhijiForm.RedGod);
                     else Visuals.HideOverlay();
                 }
                 HookCombatEvents();
