@@ -3408,6 +3408,46 @@ namespace Zhiji
                     if (plSB == null) ZLog.W("t:sumbuff no player");
                     else RewardSummonBuff(plSB);
                 }
+                if (cmd && cmdText.StartsWith("t:hurt:"))
+                {
+                    try
+                    {
+                        int nH; int.TryParse(cmdText.Substring(7).Trim(), out nH);
+                        var plH = CurrentPlayer();
+                        if (plH == null || plH.Creature == null) ZLog.W("t:hurt no player");
+                        else
+                        {
+                            ZhijiPatcher.BypassStand = true;
+                            plH.Creature.LoseHpInternal(nH, MegaCrit.Sts2.Core.ValueProps.ValueProp.Unpowered);
+                            ZhijiPatcher.BypassStand = false;
+                            ZLog.W("t:hurt " + nH + " -> hp=" + plH.Creature.CurrentHp + "/" + plH.Creature.MaxHp + " dead=" + plH.Creature.IsDead);
+                        }
+                    }
+                    catch (Exception eHt) { ZLog.W("t:hurt fail " + eHt.GetBaseException().Message); }
+                }
+                if (cmd && cmdText.StartsWith("t:enemyheal:"))
+                {
+                    try
+                    {
+                        int nEH; int.TryParse(cmdText.Substring(12).Trim(), out nEH);
+                        var csEH = MegaCrit.Sts2.Core.Combat.CombatManager.Instance != null ? MegaCrit.Sts2.Core.Combat.CombatManager.Instance.DebugOnlyGetState() : null;
+                        if (csEH == null) ZLog.W("t:enemyheal no combat");
+                        else
+                        {
+                            int k = 0;
+                            foreach (var e in csEH.Enemies)
+                            {
+                                if (e == null || e.IsDead) continue;
+                                decimal before = e.CurrentHp;
+                                e.HealInternal(nEH);
+                                ZLog.W("t:enemyheal " + nEH + " -> " + before + " => " + e.CurrentHp + " (" + e.GetType().Name + ")");
+                                k++;
+                            }
+                            if (k == 0) ZLog.W("t:enemyheal no enemy");
+                        }
+                    }
+                    catch (Exception eEH) { ZLog.W("t:enemyheal fail " + eEH.GetBaseException().Message); }
+                }
                 if (cmd && cmdText.StartsWith("t:play:"))
                 {
                     try
