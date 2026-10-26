@@ -648,7 +648,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.38");
+                ZLog.W("entry build 3.3.39");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -3576,6 +3576,44 @@ namespace Zhiji
                         }
                     }
                     catch (Exception eP2) { ZLog.W("t:play fail " + eP2.GetBaseException().Message); }
+                }
+                if (cmd && cmdText == "t:dumpdeck")
+                {
+                    ZLog.W("dumpdeck ENTERED");
+                    try
+                    {
+                        var zd = new Zhiji();
+                        var sd = zd.StartingDeck;
+                        var sb2 = new System.Text.StringBuilder();
+                        int n2 = 0;
+                        foreach (var c in sd) { if (c == null) continue; sb2.Append(c.Id.Entry).Append(' '); n2++; }
+                        ZLog.W("dumpdeck MODEL deck n=" + n2 + " [" + sb2.ToString().Trim() + "]");
+                    }
+                    catch (Exception eM2) { ZLog.W("dumpdeck model fail " + eM2.GetBaseException().Message); }
+                    try
+                    {
+                        var pld = CurrentPlayer();
+                        if (pld == null)
+                        {
+                            try
+                            {
+                                var rmd = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                                var rsd = rmd != null ? rmd.DebugOnlyGetState() : null;
+                                if (rsd != null && rsd.Players != null && rsd.Players.Count > 0) pld = rsd.Players[0];
+                                ZLog.W("dumpdeck fallback player=" + (pld != null));
+                            }
+                            catch (Exception eF) { ZLog.W("dumpdeck fallback fail " + eF.Message); }
+                        }
+                        if (pld == null || pld.Deck == null) ZLog.W("t:dumpdeck no deck");
+                        else
+                        {
+                            var sb = new System.Text.StringBuilder();
+                            int n = 0;
+                            foreach (var c in pld.Deck.Cards) { if (c == null) continue; sb.Append(c.Id.Entry).Append(' '); n++; }
+                            ZLog.W("t:dumpdeck n=" + n + " [" + sb.ToString().Trim() + "]");
+                        }
+                    }
+                    catch (Exception eD2) { ZLog.W("t:dumpdeck fail " + eD2.GetBaseException().Message); }
                 }
                 if (cmd && cmdText == "t:hand")
                 {

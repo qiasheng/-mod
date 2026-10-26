@@ -256,7 +256,21 @@ namespace Zhiji
         public override PotionPoolModel PotionPool => ModelDb.PotionPool<IroncladPotionPool>();
         public override RelicPoolModel RelicPool => ModelDb.RelicPool<ZhijiRelicPool>();
 
-        public override IEnumerable<CardModel> StartingDeck => new CardModel[]
+        public override IEnumerable<CardModel> StartingDeck
+        {
+            get
+            {
+                var arr = StarterCards();
+                try { ZLog.W("StartingDeck called -> n=" + arr.Count); } catch { }
+                return arr;
+            }
+        }
+
+        static readonly System.Collections.Generic.List<CardModel> _starter = new System.Collections.Generic.List<CardModel>();
+        static System.Collections.Generic.List<CardModel> StarterCards()
+        {
+            _starter.Clear();
+            var list = new CardModel[]
         {
             // 常规起点：3 打击 + 3 防御 + 2 张专属（构筑空间留给奖励/商店/事件）
             ModelDb.Card<MegaCrit.Sts2.Core.Models.Cards.StrikeIronclad>(),
@@ -272,7 +286,10 @@ namespace Zhiji
             ModelDb.Card<PulseAid>(),
             ModelDb.Card<Brace>(),
             ModelDb.Card<FeedGuest>()
-        };
+            };
+            foreach (var c in list) if (c != null) _starter.Add(c);
+            return _starter;
+        }
 
         public override IReadOnlyList<RelicModel> StartingRelics => new[] { ModelDb.Relic<FleshStilts>() };
 
