@@ -842,6 +842,14 @@ namespace Zhiji
                     if (pl.Creature != null) dodgeP += pl.Creature.GetPowerAmount<DodgeChancePower>();
                     if (dodgeP > 60) dodgeP = 60;
                     _statLabel.Text += "    闪避 " + dodgeP + "%";
+                    // 3.3.28：HUD 上显示变身演出状态（玩家至少能看到当前是开/关）
+                    try
+                    {
+                        ZhijiPrefs.Load();
+                        if (!ZhijiPrefs.AnimOn) _statLabel.Text += "    变身演出 关";
+                        else if (ZhijiPrefs.AnimSpeed >= 2) _statLabel.Text += "    变身演出 2x";
+                    }
+                    catch { }
                 }
                 catch { }
                 // 失控心声：地图上显示她的想法（纯反馈），并隐藏战斗用的肉块 UI
