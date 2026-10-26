@@ -648,7 +648,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.22");
+                ZLog.W("entry build 3.3.23");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -3470,6 +3470,43 @@ namespace Zhiji
                         }
                     }
                     catch (Exception eHt) { ZLog.W("t:hurt fail " + eHt.GetBaseException().Message); }
+                }
+                if (cmd && cmdText.StartsWith("t:enemydmg:"))
+                {
+                    try
+                    {
+                        int nD; int.TryParse(cmdText.Substring(11).Trim(), out nD);
+                        var csD = MegaCrit.Sts2.Core.Combat.CombatManager.Instance != null ? MegaCrit.Sts2.Core.Combat.CombatManager.Instance.DebugOnlyGetState() : null;
+                        int kD = 0;
+                        if (csD != null && csD.Enemies != null)
+                            foreach (var e in csD.Enemies)
+                            {
+                                if (e == null || e.IsDead) continue;
+                                decimal before = e.CurrentHp;
+                                e.LoseHpInternal(nD, MegaCrit.Sts2.Core.ValueProps.ValueProp.Unpowered);
+                                ZLog.W("t:enemydmg " + nD + " -> " + before + " => " + e.CurrentHp);
+                                kD++;
+                            }
+                        if (kD == 0) ZLog.W("t:enemydmg no enemy");
+                    }
+                    catch (Exception eD) { ZLog.W("t:enemydmg fail " + eD.GetBaseException().Message); }
+                }
+                if (cmd && cmdText.StartsWith("t:bleed:"))
+                {
+                    try
+                    {
+                        int nB; int.TryParse(cmdText.Substring(8).Trim(), out nB);
+                        var csB = MegaCrit.Sts2.Core.Combat.CombatManager.Instance != null ? MegaCrit.Sts2.Core.Combat.CombatManager.Instance.DebugOnlyGetState() : null;
+                        int kB = 0;
+                        if (csB != null && csB.Enemies != null)
+                            foreach (var e in csB.Enemies)
+                            {
+                                if (e == null || e.IsDead) continue;
+                                try { MegaCrit.Sts2.Core.Commands.PowerCmd.Apply<BleedPower>(null, e, nB, e, null, false); kB++; } catch (Exception eB) { ZLog.W("t:bleed apply fail " + eB.Message); }
+                            }
+                        ZLog.W("t:bleed " + nB + " -> " + kB + " enemies");
+                    }
+                    catch (Exception eB2) { ZLog.W("t:bleed fail " + eB2.GetBaseException().Message); }
                 }
                 if (cmd && cmdText.StartsWith("t:enemyheal:"))
                 {
