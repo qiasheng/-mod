@@ -3408,6 +3408,36 @@ namespace Zhiji
                     if (plSB == null) ZLog.W("t:sumbuff no player");
                     else RewardSummonBuff(plSB);
                 }
+                if (cmd && cmdText.StartsWith("t:play:"))
+                {
+                    try
+                    {
+                        string wantP = cmdText.Substring(7).Trim().ToUpperInvariant();
+                        var plP = CurrentPlayer();
+                        var handP = plP != null ? MegaCrit.Sts2.Core.Entities.Cards.CardPile.Get(MegaCrit.Sts2.Core.Entities.Cards.PileType.Hand, plP) : null;
+                        if (handP == null) ZLog.W("t:play no hand");
+                        else
+                        {
+                            MegaCrit.Sts2.Core.Entities.Creatures.Creature tgtP = null;
+                            try
+                            {
+                                var csP = MegaCrit.Sts2.Core.Combat.CombatManager.Instance != null ? MegaCrit.Sts2.Core.Combat.CombatManager.Instance.DebugOnlyGetState() : null;
+                                if (csP != null && csP.Enemies != null) foreach (var e in csP.Enemies) if (e != null && !e.IsDead) { tgtP = e; break; }
+                            }
+                            catch { }
+                            bool played = false;
+                            foreach (var cP in handP.Cards)
+                            {
+                                if (cP == null || cP.Id.Entry != wantP) continue;
+                                played = cP.TryManualPlay(tgtP);
+                                ZLog.W("t:play " + wantP + " ok=" + played);
+                                break;
+                            }
+                            if (!played) ZLog.W("t:play not found/blocked " + wantP);
+                        }
+                    }
+                    catch (Exception eP2) { ZLog.W("t:play fail " + eP2.GetBaseException().Message); }
+                }
                 if (cmd && cmdText == "t:hand")
                 {
                     try
