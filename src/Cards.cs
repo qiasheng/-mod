@@ -391,7 +391,11 @@ namespace Zhiji
         {
             try
             {
+                // 3.3.25：统一为单一召唤物「血肉」；拿到红神之心后升级成「眷属」
+                bool asc = Owner != null && Owner.Relics != null && Owner.Relics.Any(r => r is RedGodHeart);
+                if (asc) { hp = System.Math.Min(60, hp + hp / 2); }
                 var res = await MegaCrit.Sts2.Core.Commands.OstyCmd.Summon(ctx, Owner, hp, this);
+                if (asc) ZLog.W("osty ascended (眷属) hp=" + hp);
                 int cur = Owner.Osty != null ? (int)Owner.Osty.CurrentHp : -1;
                 ZLog.W("osty summon hp=" + hp + " -> " + cur);
                 try
@@ -2248,7 +2252,7 @@ namespace Zhiji
         {
             CountUse(play);
             int hp = System.Math.Max(12, 12 + St.Feast / 2);
-            if (OstyAlive) { Owner.Osty.SetMaxHpInternal(Owner.Osty.MaxHp + 2); Owner.Osty.HealInternal(2); St.AddFeast(3); St.MinionHp2 = System.Math.Max(St.MinionHp2, hp); ZLog.W("multiply: osty +2 max, minion2 hp=" + St.MinionHp2); }
+            if (OstyAlive) { Owner.Osty.SetMaxHpInternal(Owner.Osty.MaxHp + 2); Owner.Osty.HealInternal(2); St.AddFeast(3); ZLog.W("multiply: osty +2 max"); }
             else await SummonOsty(ctx, hp);
             ZhijiPatcher.RewardSummonBuff(Owner);
             Sync(ctx);
@@ -2419,8 +2423,8 @@ namespace Zhiji
         public override bool DotStyle => false;
         protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
         {
-            St.Summon(Up ? 18 : 12, Owner != null && Owner.Relics != null && Owner.Relics.Any(r => r is DinnerBell) ? 40 : 30);
-            ZLog.W("summon guest -> hp=" + St.MinionHp);
+            await SummonOsty(ctx, Up ? 18 : 12);
+            ZLog.W("summon guest -> osty");
             Sync(ctx);
             await Task.CompletedTask;
         }
@@ -2432,8 +2436,9 @@ namespace Zhiji
         public SecondHelping() : base(0, CardType.Skill, CardRarity.Uncommon, TargetType.Self) { }
         protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
         {
-            St.Summon(Up ? 10 : 6, Owner != null && Owner.Relics != null && Owner.Relics.Any(r => r is DinnerBell) ? 40 : 30);
-            ZLog.W("second helping -> hp=" + St.MinionHp);
+            if (OstyAlive) { Owner.Osty.SetMaxHpInternal(Owner.Osty.MaxHp + (Up ? 10 : 6)); Owner.Osty.HealInternal(Up ? 10 : 6); }
+            else await SummonOsty(ctx, Up ? 10 : 6);
+            ZLog.W("second helping -> osty");
             Sync(ctx);
             await Task.CompletedTask;
         }
@@ -2445,8 +2450,8 @@ namespace Zhiji
         public GrandBanquet() : base(2, CardType.Skill, CardRarity.Uncommon, TargetType.Self) { }
         protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay play)
         {
-            St.Summon(Up ? 34 : 24, Owner != null && Owner.Relics != null && Owner.Relics.Any(r => r is DinnerBell) ? 40 : 30);
-            ZLog.W("grand banquet -> hp=" + St.MinionHp);
+            await SummonOsty(ctx, Up ? 34 : 24);
+            ZLog.W("grand banquet -> osty");
             Sync(ctx);
             await Task.CompletedTask;
         }

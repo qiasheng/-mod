@@ -648,7 +648,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.24");
+                ZLog.W("entry build 3.3.25");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -8077,7 +8077,7 @@ namespace Zhiji
                     {"deepen.description", "本场战斗施加的[gold]流血[/gold]额外+{Percent}%（可叠加）。"},
                     {"blood_thirst_power.title", "越割越深"},
                     {"blood_thirst_power.description", "每层使施加的[gold]流血[/gold]额外+50%。"},
-                    {"summon_guest.title", "招来食客"},
+                    {"summon_guest.title", "唤醒血肉"},
                     {"summon_guest.description", "召唤一个食客替你挨打：获得12点食客生命（上限30）。\n食客每回合开始咬敌人3点（开饭铃+4）。"},
                     {"second_helping.title", "加餐"},
                     {"second_helping.description", "给食客补6点生命。"},
