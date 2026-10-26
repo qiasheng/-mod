@@ -648,7 +648,7 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.30");
+                ZLog.W("entry build 3.3.31");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
@@ -5485,6 +5485,22 @@ namespace Zhiji
         public static void LoseHpPrefix(MegaCrit.Sts2.Core.Entities.Creatures.Creature __instance, ref decimal amount)
         {
             _lastStandUsed = 0;
+            // 3.3.31：观察 S7 —— 血肉（Osty）受到伤害时记录来源未知的伤害，用于判断 AoE 是否会打到召唤物
+            try
+            {
+                if (__instance != null && amount > 0)
+                {
+                    var rmO2 = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                    var rsO2 = rmO2 != null ? rmO2.DebugOnlyGetState() : null;
+                    if (rsO2 != null && rsO2.Players != null)
+                        foreach (var plO2 in rsO2.Players)
+                        {
+                            if (plO2 == null || plO2.Osty == null || plO2.Osty != __instance) continue;
+                            ZLog.W("osty took dmg=" + amount + " hp=" + __instance.CurrentHp + "/" + __instance.MaxHp);
+                        }
+                }
+            }
+            catch { }
             try
             {
                 try
