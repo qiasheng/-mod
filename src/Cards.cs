@@ -167,7 +167,27 @@ namespace Zhiji
             {
                 if (play == null) return;
                 if (RedGod) return;                       // 红神牌不计形态计数
-                if (play.Target == null) St.DefCount++; else St.AtkCount++;
+                if (play.Target == null)
+                {
+                    St.DefCount++;
+                    // 3.3.38（W3）：空放=「对自己打出」不再只是计形态，给实打实的收益：
+                    // 获得格挡（费用越高越多）+ 1 搏动，让"守"这一手有存在感。
+                    try
+                    {
+                        int cost = 0;
+                        try { cost = EnergyCost != null ? EnergyCost.GetResolved() : 0; } catch { }
+                        int blk = 3 + cost * 2;
+                        if (Owner != null && Owner.Creature != null)
+                        {
+                            _ = MegaCrit.Sts2.Core.Commands.CreatureCmd.GainBlock(Owner.Creature, blk,
+                                MegaCrit.Sts2.Core.ValueProps.ValueProp.Move, play, false);
+                            St.AddPulse(1);
+                            ZLog.W("self play: " + Id.Entry + " block+" + blk + " pulse+1");
+                        }
+                    }
+                    catch (Exception eSP) { ZLog.W("self play bonus fail " + eSP.Message); }
+                }
+                else St.AtkCount++;
             }
             catch { }
         }
