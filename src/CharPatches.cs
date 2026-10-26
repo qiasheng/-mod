@@ -399,6 +399,8 @@ namespace Zhiji
         }
 
         // 卡图：优先用 mod 自带贴图
+        static readonly System.Collections.Generic.HashSet<string> _noArtIds = new System.Collections.Generic.HashSet<string>();
+
         public static bool CardPortrait(CardModel __instance, ref Texture2D __result)
         {
             if (!(__instance is ZhijiCard)) return true;
@@ -428,7 +430,17 @@ namespace Zhiji
                     default: t = Art.Get("zhiji_idle"); break;
                 }
             }
-            if (t == null) return true;
+            // 3.3.35：兜底链——衍生/两用卡如果没有独立立绘，依次退回通用图，
+            // 避免"卡面空白但仍占位"（玩家反馈：有概率出现一张空白牌）
+            if (t == null) t = Art.Get("drive");
+            if (t == null) t = Art.Get("zhiji_idle");
+            if (t == null)
+            {
+                string idB = "?";
+                try { idB = __instance.Id.Entry; } catch { }
+                if (_noArtIds.Add(idB)) ZLog.W("card art missing (no fallback): " + idB);
+                return true;
+            }
             __result = t;
             return false;
         }
