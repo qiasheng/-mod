@@ -134,6 +134,19 @@ dotnet build zhiji.csproj      # 需要 .NET SDK 9（游戏程序集是 net9.0�
 ### 7 注意事项
 
 - 测试前先 `pkill` 旧游戏进程，避免多个实例抢 Steam；
-- 不要直接在 `main` 改，先建分支；
+- **主线就是 `main`**：直接提交/推送到 `main`，本项目不再用功能分支；
 - 改动前先读本文件与 `docs/实现参数.md`；
 - 不要提交 `HANDOVER.md` 到公开仓库。
+
+## 8. 发版流程（GitHub Release）
+
+```bash
+git tag -f v<版本> main && git push origin v<版本>          # 打标签
+# 用 API 建 Release 并上传 zip（PAT 需 Contents: write）
+curl -X POST -H "Authorization: Bearer $TOKEN" --data-binary @rel.json \
+  https://api.github.com/repos/qiasheng/-mod/releases
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/zip" \
+  --data-binary @pkg_zip https://uploads.github.com/repos/qiasheng/-mod/releases/<id>/assets?name=zhiji_<版本>.zip
+```
+
+注意：只推提交不会出现在 Releases 页面，必须建 Release 并上传 zip。

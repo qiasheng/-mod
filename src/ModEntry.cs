@@ -3382,6 +3382,39 @@ namespace Zhiji
                     }
                     catch (Exception eEv2) { ZLog.W("t:evm fail " + eEv2.GetBaseException().Message); }
                 }
+                if (cmd && cmdText == "t:evallowed")
+                {
+                    // 列出当前 act 下允许出现的事件（含我们的宿主 DenseVegetation/SunkenTreasury 是否在内）
+                    try
+                    {
+                        var rmEA = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                        var rsEA = rmEA != null ? rmEA.DebugOnlyGetState() : null;
+                        if (rsEA == null) { ZLog.W("t:evallowed no run state"); }
+                        else
+                        {
+                            var allowed = new System.Text.StringBuilder();
+                            int n = 0, total = 0;
+                            foreach (var m in MegaCrit.Sts2.Core.Models.ModelDb.All)
+                            {
+                                var ev = m as MegaCrit.Sts2.Core.Models.EventModel;
+                                if (ev == null) continue;
+                                total++;
+                                bool ok = false;
+                                try
+                                {
+                                    var mi = ev.GetType().GetMethod("IsAllowed", BindingFlags.Public | BindingFlags.Instance);
+                                    if (mi != null) ok = (bool)mi.Invoke(ev, new object[] { rsEA });
+                                }
+                                catch { }
+                                if (!ok) continue;
+                                n++;
+                                if (n <= 24) allowed.Append(ev.GetType().Name).Append(' ');
+                            }
+                            ZLog.W("t:evallowed act=" + rsEA.CurrentActIndex + " allowed=" + n + "/" + total + " [" + allowed.ToString().Trim() + "]");
+                        }
+                    }
+                    catch (Exception eEA) { ZLog.W("t:evallowed fail " + eEA.GetBaseException().Message); }
+                }
                 if (cmd && cmdText.StartsWith("t:act:"))
                 {
                     // 只改 RunState.CurrentActIndex（不触发远古事件/房间重建），用于测试第二层事件
