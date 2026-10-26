@@ -1418,6 +1418,22 @@ namespace Zhiji
                 var pl = rs != null && rs.Players != null && rs.Players.Count > 0 ? rs.Players[0] : null;
                 if (pl == null) return;
                 var st = ZhijiStore.Of(pl);
+                // 3.3.47（W5）：逐帧按房间类型决定立绘是否显示——
+                // 战斗/精英/Boss/商店/事件显示，其余（地图、休息处等）隐藏。
+                try
+                {
+                    var room = rs != null ? rs.CurrentRoom : null;
+                    string rt = room != null ? room.RoomType.ToString() : "";
+                    bool showRoom = rt.Contains("Combat") || rt.Contains("Monster") || rt.Contains("Elite") || rt.Contains("Boss")
+                        || rt.Contains("Shop") || rt.Contains("Merchant") || rt.Contains("Event");
+                    if (showRoom)
+                    {
+                        bool need = !_overlayWanted || _overlay == null || !GodotObject.IsInstanceValid(_overlay) || !_overlay.Visible;
+                        if (need) ShowOverlay(ZhijiStore.CurrentForm() == ZhijiForm.RedGod);
+                    }
+                    else if (_overlayWanted) { HideOverlay(); ZLog.W("overlay hidden (room=" + rt + ")"); }
+                }
+                catch { }
                 int sig = st.Pulse * 31 + st.Hunger * 13 + st.Feast * 17 + st.Stand * 7 + st.Craving * 3;
                 if (sig == _lastSig) return;
                 _lastSig = sig;
