@@ -1187,6 +1187,43 @@ namespace Zhiji
             catch { }
         }
 
+        // 3.3.52（W4/W5）：战斗结算/死亡后抑制「按房间自动重画立绘」，直到房间切换。
+        // 否则 debug pump 每 0.25s 会把刚隐藏的立绘又弹回奖励页/死亡页。
+        static bool _overlaySuppressed;
+        public static void SuppressOverlay(string why)
+        {
+            if (!_overlaySuppressed) ZLog.W("overlay suppressed (" + why + ")");
+            _overlaySuppressed = true;
+            HideOverlay();
+        }
+
+        // 3.3.52（W4）：按「当前房间类型」决定立绘显隐。
+        // 由 debug pump（0.25s）每拍调用——这是模组里最可靠的主线程节拍，
+        // 避免依赖 OverlayWatcher._Process（部分加载路径下不 tick）和只会在战斗期触发的 Powers.Sync。
+        public static void SyncOverlayForRoom()
+        {
+            try
+            {
+                var rm = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                var rs = rm != null ? rm.DebugOnlyGetState() : null;
+                var room = rs != null ? rs.CurrentRoom : null;
+                string rt;
+                try { rt = room != null ? room.RoomType.ToString() : "<none>"; }
+                catch (Exception eRT) { rt = "<ERR:" + eRT.GetBaseException().GetType().Name + ":" + eRT.GetBaseException().Message + ">"; }
+                if (rt != _lastRoomType) { _lastRoomType = rt; _overlaySuppressed = false; ZLog.W("room type -> '" + rt + "'"); }
+                bool showRoom = rt.Contains("Combat") || rt.Contains("Monster") || rt.Contains("Elite") || rt.Contains("Boss")
+                    || rt.Contains("Shop") || rt.Contains("Merchant") || rt.Contains("Event");
+                if (showRoom)
+                {
+                    if (_overlaySuppressed) return;   // 战斗结算/死亡后不再自动重画（W5），直到换房间
+                    bool need = !_overlayWanted || _overlay == null || !GodotObject.IsInstanceValid(_overlay) || !_overlay.Visible;
+                    if (need) ShowOverlay(ZhijiStore.CurrentForm() == ZhijiForm.RedGod);
+                }
+                else if (_overlayWanted) { HideOverlay(); ZLog.W("overlay hidden (room=" + rt + ")"); }
+            }
+            catch (Exception e) { ZLog.W("room gating fail " + e.Message); }
+        }
+
         static CanvasLayer _layer;
         static AnimatedSprite2D _overlay;
         static Vector2 _overlayBase;
@@ -1312,6 +1349,7 @@ namespace Zhiji
         {
             try
             {
+                _overlaySuppressed = true;      // 死亡贴图期间不许 pump 把立绘弹回来
                 EnsureSpriteLayer();
                 var tree = Engine.GetMainLoop() as SceneTree;
                 if (tree == null || _layer == null || !GodotObject.IsInstanceValid(_layer)) return;
@@ -1405,6 +1443,7 @@ namespace Zhiji
         static long _lastCardRefresh;
         static int _lastSig;
         static bool _refreshDbg;
+        static string _lastRoomType;
         public static void RefreshHandValues()
         {
             try
@@ -1420,20 +1459,9 @@ namespace Zhiji
                 var st = ZhijiStore.Of(pl);
                 // 3.3.47（W5）：逐帧按房间类型决定立绘是否显示——
                 // 战斗/精英/Boss/商店/事件显示，其余（地图、休息处等）隐藏。
-                try
-                {
-                    var room = rs != null ? rs.CurrentRoom : null;
-                    string rt = room != null ? room.RoomType.ToString() : "";
-                    bool showRoom = rt.Contains("Combat") || rt.Contains("Monster") || rt.Contains("Elite") || rt.Contains("Boss")
-                        || rt.Contains("Shop") || rt.Contains("Merchant") || rt.Contains("Event");
-                    if (showRoom)
-                    {
-                        bool need = !_overlayWanted || _overlay == null || !GodotObject.IsInstanceValid(_overlay) || !_overlay.Visible;
-                        if (need) ShowOverlay(ZhijiStore.CurrentForm() == ZhijiForm.RedGod);
-                    }
-                    else if (_overlayWanted) { HideOverlay(); ZLog.W("overlay hidden (room=" + rt + ")"); }
-                }
-                catch { }
+                // 3.3.52（W4）：门控抽成 SyncOverlayForRoom()，由可靠的 debug pump（0.25s）每拍驱动，
+                // 不再依赖 OverlayWatcher._Process（该节点在部分加载路径下不 tick）与战斗期 Powers.Sync。
+                SyncOverlayForRoom();
                 int sig = st.Pulse * 31 + st.Hunger * 13 + st.Feast * 17 + st.Stand * 7 + st.Craving * 3;
                 if (sig == _lastSig) return;
                 _lastSig = sig;

@@ -648,13 +648,13 @@ namespace Zhiji
         {
             try
             {
-                ZLog.W("entry build 3.3.51");
+                ZLog.W("entry build 3.3.52");
             try
             {
                 var treeW = Godot.Engine.GetMainLoop() as Godot.SceneTree;
                 if (treeW != null && treeW.Root != null)
                 {
-                    var wt = new Godot.Timer(); wt.WaitTime = 1.0; wt.OneShot = true;
+                    var wt = new Godot.Timer(); wt.WaitTime = 1.0; wt.OneShot = true; wt.Autostart = true;
                     wt.Timeout += () => { try { Visuals.EnsureWatcher(); } catch { } };
                     treeW.Root.CallDeferred(Godot.Node.MethodName.AddChild, wt);
                 }
@@ -1452,7 +1452,7 @@ namespace Zhiji
                 Godot.SceneTreeTimer Next()
                 {
                     var t = tree.CreateTimer(0.25);
-                    t.Timeout += () => { try { DebugHotkeyTick(); AutoTestTick(); Visuals.TickSceneCharacters(); Visuals.SyncOverlayForUI(); Visuals.SyncStatPanel(); } catch { } Next(); };
+                    t.Timeout += () => { try { DebugHotkeyTick(); AutoTestTick(); Visuals.TickSceneCharacters(); Visuals.SyncOverlayForRoom(); Visuals.SyncOverlayForUI(); Visuals.SyncStatPanel(); } catch { } Next(); };
                     return t;
                 }
                 Next();
@@ -3082,6 +3082,26 @@ namespace Zhiji
                         if (plOS != null) OpenDotShop(plOS);
                     }
                     catch (Exception eOS) { ZLog.W("openshop fail " + eOS.Message); }
+                }
+                if (cmd && cmdText == "shoptest")
+                {
+                    // 走「地图坐标 + RoomType.Shop」正常入口进商店，便于验证玩家真实路径（W4）
+                    try
+                    {
+                        var rmST = MegaCrit.Sts2.Core.Runs.RunManager.Instance;
+                        var rsST = rmST != null ? rmST.DebugOnlyGetState() : null;
+                        if (rsST == null) { ZLog.W("shoptest no run state"); }
+                        else
+                        {
+                            var coordST = rsST.CurrentMapCoord.HasValue ? rsST.CurrentMapCoord.Value : new MegaCrit.Sts2.Core.Map.MapCoord(0, 0);
+                            ZLog.W("shoptest coord=" + coordST);
+                            var tST = rmST.EnterMapCoordDebug(coordST, MegaCrit.Sts2.Core.Rooms.RoomType.Shop,
+                                MegaCrit.Sts2.Core.Map.MapPointType.Shop, (MegaCrit.Sts2.Core.Models.AbstractModel)null, true);
+                            _ = tST.ContinueWith(x => ZLog.W("shoptest ok=" + (x.Status == System.Threading.Tasks.TaskStatus.RanToCompletion)
+                                + (x.Exception != null ? (" err=" + x.Exception.GetBaseException().Message) : "")));
+                        }
+                    }
+                    catch (Exception eST) { ZLog.W("shoptest fail " + eST.GetBaseException().Message); }
                 }
                 if (cmd && cmdText == "state")
                 {
@@ -6484,8 +6504,8 @@ namespace Zhiji
             {
                 var cm = MegaCrit.Sts2.Core.Combat.CombatManager.Instance;
                 if (cm == null) return;
-                cm.CombatWon += _ => { try { Visuals.HideOverlay(); ZLog.W("combat won -> hide"); } catch { } };
-                cm.CombatEnded += _ => { try { Visuals.HideOverlay(); ZLog.W("combat ended -> hide"); } catch { } };
+                cm.CombatWon += _ => { try { Visuals.SuppressOverlay("combat won"); ZLog.W("combat won -> hide"); } catch { } };
+                cm.CombatEnded += _ => { try { Visuals.SuppressOverlay("combat ended"); ZLog.W("combat ended -> hide"); } catch { } };
                 _eventsHooked = true;
                 ZLog.W("combat events hooked");
                 CopyEngineLog("start");
