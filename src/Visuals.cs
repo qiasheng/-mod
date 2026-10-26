@@ -1211,8 +1211,11 @@ namespace Zhiji
                 try { rt = room != null ? room.RoomType.ToString() : "<none>"; }
                 catch (Exception eRT) { rt = "<ERR:" + eRT.GetBaseException().GetType().Name + ":" + eRT.GetBaseException().Message + ">"; }
                 if (rt != _lastRoomType) { _lastRoomType = rt; _overlaySuppressed = false; ZLog.W("room type -> '" + rt + "'"); }
+                // 3.3.54：事件房不再显示覆盖层立绘（3.3.52 门控激活后，事件里没有玩家角色节点，
+                // 立绘只能落在兜底位置，会突兀地插在事件画面里）。事件若本身有玩家角色，
+                // 由 TryReplacePlayerCreature 的场景替身负责。
                 bool showRoom = rt.Contains("Combat") || rt.Contains("Monster") || rt.Contains("Elite") || rt.Contains("Boss")
-                    || rt.Contains("Shop") || rt.Contains("Merchant") || rt.Contains("Event");
+                    || rt.Contains("Shop") || rt.Contains("Merchant");
                 if (showRoom)
                 {
                     if (_overlaySuppressed) return;   // 战斗结算/死亡后不再自动重画（W5），直到换房间
