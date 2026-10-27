@@ -47,7 +47,7 @@ tar czf zhiji.zip -C pkg zhiji
 
 ```
 src/            Mod 源码（C# / Godot 4.5）
-pkg/zhiji/      mod 资源：zhiji.json + art/
+pkg/zhiji/      mod 清单 zhiji.json（art/ 美术资源不入库，见下）
 docs/           实现细节与历次修复记录（实现参数.md）
 build.rsp       编译参数
 ```
@@ -73,13 +73,19 @@ build.rsp       编译参数
 - 提交 Issue 说明 bug / 建议；
 - Fork → 分支 → PR（请勿直接推 `main`）；
 - 详细规则见 [CONTRIBUTING.md](CONTRIBUTING.md)；
-- 大文件（美术、成品 zip）请走 Release，不要把新增大图直接塞进仓库。
+- 美术资源（`pkg/zhiji/art/`）与成品 zip **不入库**（版权原因），仓库只保留源码；
+- 完整包（含美术）的下载请找咕咕。
 
 ## 版本约定
 
 - `x.y.z`：x 大版本，y 功能批次，z 修复；
 - 每次修复请在 `docs/实现参数.md` 追加一节，写清现象、原因、验证方式。
 
+## 下载
+
+本仓库只包含**源代码**。完整安装包（含美术资源）不在这里提供，**下载请找咕咕**。
+
 ## License
 
-MIT，见 [LICENSE](LICENSE)。
+源码 MIT，见 [LICENSE](LICENSE)。
+美术资源（`pkg/zhiji/art/`）不属于本仓库、也不在 MIT 许可范围内，版权归各自作者。
