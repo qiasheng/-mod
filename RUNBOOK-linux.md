@@ -138,15 +138,29 @@ dotnet build zhiji.csproj      # 需要 .NET SDK 9（游戏程序集是 net9.0�
 - 改动前先读本文件与 `docs/实现参数.md`；
 - 不要提交 `HANDOVER.md` 到公开仓库。
 
-## 8. 发版流程（GitHub Release）
+## 8. 发布流程（只本地完整打包）
+
+> **政策（2026-10-27 起）**：git 仓库只保留**修复日志**（`docs/`）和**纯代码**（`src/` 等），
+> 不含美术资源；**不再向 GitHub Release 上传任何 ZIP**。完整安装包只在本地构建、本地分发。
 
 ```bash
-git tag -f v<版本> main && git push origin v<版本>          # 打标签
-# 用 API 建 Release 并上传 zip（PAT 需 Contents: write）
-curl -X POST -H "Authorization: Bearer $TOKEN" --data-binary @rel.json \
-  https://api.github.com/repos/qiasheng/-mod/releases
-curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/zip" \
-  --data-binary @pkg_zip https://uploads.github.com/repos/qiasheng/-mod/releases/<id>/assets?name=zhiji_<版本>.zip
+# 1) 构建（需要本地 pkg/zhiji/art，已 .gitignore，不入库）
+/home/firefly/dotnet9/dotnet build zhiji.csproj
+cp bin/zhiji.dll pkg/zhiji/zhiji.dll
+
+# 2) 本地打完整 ZIP（第一层 zhiji/）
+python3 - <<'PY'
+import zipfile, os
+root, out = 'pkg/zhiji', '/tmp/zhiji_<版本>.zip'
+with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+    for dp, dns, fns in os.walk(root):
+        for fn in sorted(fns):
+            full = os.path.join(dp, fn)
+            z.write(full, os.path.join('zhiji', os.path.relpath(full, root)))
+PY
+
+# 3) 自己分发（发给咕咕/玩家），不上传 GitHub
 ```
 
-注意：只推提交不会出现在 Releases 页面，必须建 Release 并上传 zip。
+- GitHub 上只推代码 + 文档提交，**不建 Release、不上传 ZIP**；
+- 旧 Release 的 ZIP 资产已于 2026-10-27 全部下架，说明保留并写明「下载请找咕咕」。
